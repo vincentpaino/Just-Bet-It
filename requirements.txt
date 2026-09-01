@@ -1,0 +1,21 @@
+# --- Core ---
+pandas
+numpy
+python-dotenv
+
+# --- Database ---
+sqlalchemy
+psycopg2-binary
+alembic
+
+# --- ML ---
+scikit-learn
+xgboost
+optuna
+
+# --- Data sources ---
+sportsipy
+requests
+
+# --- Testing ---
+pytest
