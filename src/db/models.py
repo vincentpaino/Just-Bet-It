@@ -1,76 +1,117 @@
 """
-SQLAlchemy models matching the project's ERD (six tables):
-games, teams, features, odds, users, user_predictions.
-
-These are starting-point stubs — fill in columns per your finalized ERD,
-then generate the first Alembic migration:
-    alembic revision --autogenerate -m "initial schema"
-    alembic upgrade head
+SQLAlchemy ORM models for Just Bet It.
+Mirrors db/schema.sql — keep the two in sync.
 """
+from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, Float, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy import (
+    Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey,
+    Integer, Numeric, String, Text, UniqueConstraint
+)
+from sqlalchemy.orm import declarative_base, relationship
 
-from src.db.database import Base
+Base = declarative_base()
 
 
 class Team(Base):
     __tablename__ = "teams"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)
+    team_id = Column(Integer, primary_key=True)
+    team_name = Column(String(100), nullable=False, unique=True)
+    conference = Column(String(100))
+    division = Column(String(100))
 
 
 class Game(Base):
     __tablename__ = "games"
+    __table_args__ = (
+        CheckConstraint("home_team_id <> away_team_id", name="chk_different_teams"),
+    )
 
-    id = Column(Integer, primary_key=True)
-    home_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    away_team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    game_date = Column(DateTime, nullable=False)
+    game_id = Column(Integer, primary_key=True)
+    home_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
+    away_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
+    game_date = Column(Date, nullable=False)
+    home_score = Column(Integer)
+    away_score = Column(Integer)
+    home_win = Column(Boolean)
 
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])
+    features = relationship("Feature", back_populates="game", uselist=False)
+    odds = relationship("Odds", back_populates="game")
 
 
 class Feature(Base):
     __tablename__ = "features"
+    __table_args__ = (UniqueConstraint("game_id", name="uq_feature_game"),)
 
-    id = Column(Integer, primary_key=True)
-    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
-    # add engineered feature columns here (rolling averages, efficiency metrics, etc.)
+    feature_id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.game_id", ondelete="CASCADE"), nullable=False)
+    rolling_win_pct_home = Column(Numeric(5, 4))
+    rolling_win_pct_away = Column(Numeric(5, 4))
+    elo_home = Column(Numeric(7, 2))
+    elo_away = Column(Numeric(7, 2))
+    rest_days_home = Column(Integer)
+    rest_days_away = Column(Integer)
+    home_away_split = Column(Numeric(5, 4))
+    sos_home = Column(Numeric(5, 4))
+    sos_away = Column(Numeric(5, 4))
+
+    game = relationship("Game", back_populates="features")
 
 
 class Odds(Base):
     __tablename__ = "odds"
+    __table_args__ = (
+        UniqueConstraint("game_id", "sportsbook", "fetched_at", name="uq_odds_snapshot"),
+    )
 
-    id = Column(Integer, primary_key=True)
-    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
-    sportsbook = Column(String, nullable=False)
-    market = Column(String, nullable=False)  # moneyline / spread / over_under
-    line = Column(Float)
-    price = Column(Float)
-    polled_at = Column(DateTime, nullable=False)
+    odds_id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.game_id", ondelete="CASCADE"), nullable=False)
+    sportsbook = Column(String(100), nullable=False)
+    home_moneyline = Column(Numeric(8, 2))
+    away_moneyline = Column(Numeric(8, 2))
+    spread = Column(Numeric(5, 2))
+    over_under = Column(Numeric(5, 2))
+    implied_prob_home = Column(Numeric(5, 4))
+    implied_prob_away = Column(Numeric(5, 4))
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    game = relationship("Game", back_populates="odds")
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True)
-    username = Column(String, nullable=False, unique=True)
-    email = Column(String, nullable=False, unique=True)
-    password_hash = Column(String, nullable=False)  # bcrypt hash — never plaintext
-    is_active = Column(Boolean, default=True)
+    user_id = Column(Integer, primary_key=True)
+    username = Column(String(50), nullable=False, unique=True)
+    email = Column(String(255), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_login = Column(DateTime)
 
 
 class UserPrediction(Base):
     __tablename__ = "user_predictions"
 
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
-    model_probability = Column(Float)
-    implied_probability = Column(Float)
-    edge = Column(Float)
-    recommended_stake = Column(Float)  # Kelly-sized amount
-    outcome = Column(String, nullable=True)  # filled in post-game
+    prediction_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.game_id", ondelete="CASCADE"), nullable=False)
+    predicted_winner = Column(Integer, ForeignKey("teams.team_id"))
+    confidence = Column(Numeric(5, 4))
+    bet_amount = Column(Numeric(10, 2))
+    outcome = Column(String(20))
+    roi_result = Column(Numeric(8, 4))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class IngestionLog(Base):
+    __tablename__ = "ingestion_log"
+
+    log_id = Column(Integer, primary_key=True)
+    source = Column(String(50), nullable=False)
+    run_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    record_count = Column(Integer, nullable=False, default=0)
+    success = Column(Boolean, nullable=False, default=True)
+    error_message = Column(Text)
