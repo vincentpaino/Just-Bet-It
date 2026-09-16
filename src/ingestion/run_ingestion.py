@@ -10,13 +10,17 @@ import argparse
 import sys
 from datetime import datetime
 
-from db import IngestionLog, Team, Odds
-from db import SessionLocal, init_db
-frm ingestion.odds_api import fetch_odds, validate_and_format as validate_odds
-from ingestion.sportsipy_ingest import (
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from db.models import IngestionLog, Team, Odds
+from db.session import SessionLocal, init_db
+from ingestion.odds_api import fetch_odds, validate_and_format as validate_odds
+from ingestion.cfbd_ingest import (
     fetch_team_season_stats,
     validate_and_format as validate_stats,
-    SportsipyUnavailableError,
+    CFBDUnavailableError,
 )
 
 
@@ -25,12 +29,11 @@ def _get_or_create_team(session, team_name: str) -> Team:
     if team is None:
         team = Team(team_name=team_name)
         session.add(team)
-        session.flush()  # populate team.team_id without committing yet
+        session.flush()
     return team
 
 
 def ingest_odds(session) -> int:
-    """Fetch + validate + persist current odds. Returns rows written."""
     raw = fetch_odds()
     rows = validate_odds(raw)
 
@@ -39,12 +42,7 @@ def ingest_odds(session) -> int:
         home_team = _get_or_create_team(session, row["home_team"])
         away_team = _get_or_create_team(session, row["away_team"])
 
-        # NOTE: this creates a bare game shell keyed on team names + date.
-        # Once feature engineering (Sprint 3) exists, this should instead
-        # look up the matching game_id from the games table by
-        # (home_team_id, away_team_id, game_date) and only create one if
-        # it truly doesn't exist yet.
-        from db import Game
+        from db.models import Game
         game = (
             session.query(Game)
             .filter_by(home_team_id=home_team.team_id, away_team_id=away_team.team_id)
@@ -77,12 +75,12 @@ def ingest_odds(session) -> int:
 
 
 def ingest_historical_stats(session, year: int) -> int:
-    """Fetch + validate + persist one season of team stats. Returns rows written."""
     raw_df = fetch_team_season_stats(year)
     records = validate_stats(raw_df)
 
     for record in records:
-        _get_or_create_team(session, record["team_name"])
+        _get_or_create_team(session, record["home_team"])
+        _get_or_create_team(session, record["away_team"])
 
     session.commit()
     return len(records)
@@ -100,6 +98,7 @@ def log_run(session, source: str, record_count: int, success: bool, error: str =
 
 
 def main() -> int:
+    print("SCRIPT STARTED")
     parser = argparse.ArgumentParser(description="Run Just Bet It data ingestion")
     parser.add_argument("--year", type=int, default=datetime.utcnow().year,
                          help="Season year for historical stats ingestion")
@@ -116,7 +115,7 @@ def main() -> int:
             count = ingest_odds(session)
             log_run(session, "odds_api", count, success=True)
             print(f"[odds_api] ingested {count} odds rows")
-        except Exception as exc:  # noqa: BLE001 — log and continue to stats
+        except Exception as exc:
             session.rollback()
             log_run(session, "odds_api", 0, success=False, error=str(exc))
             print(f"[odds_api] FAILED: {exc}", file=sys.stderr)
@@ -125,17 +124,17 @@ def main() -> int:
     if not args.skip_stats:
         try:
             count = ingest_historical_stats(session, args.year)
-            log_run(session, "sportsipy", count, success=True)
-            print(f"[sportsipy] ingested {count} team-season records for {args.year}")
-        except SportsipyUnavailableError as exc:
+            log_run(session, "cfbd", count, success=True)
+            print(f"[cfbd] ingested {count} game records for {args.year}")
+        except CFBDUnavailableError as exc:
             session.rollback()
-            log_run(session, "sportsipy", 0, success=False, error=str(exc))
-            print(f"[sportsipy] UNAVAILABLE: {exc}", file=sys.stderr)
+            log_run(session, "cfbd", 0, success=False, error=str(exc))
+            print(f"[cfbd] UNAVAILABLE: {exc}", file=sys.stderr)
             exit_code = 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             session.rollback()
-            log_run(session, "sportsipy", 0, success=False, error=str(exc))
-            print(f"[sportsipy] FAILED: {exc}", file=sys.stderr)
+            log_run(session, "cfbd", 0, success=False, error=str(exc))
+            print(f"[cfbd] FAILED: {exc}", file=sys.stderr)
             exit_code = 1
 
     session.close()

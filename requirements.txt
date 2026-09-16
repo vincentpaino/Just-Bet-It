@@ -16,6 +16,6 @@ optuna
 # --- Data sources ---
 sportsipy
 requests
-
+cfbd
 # --- Testing ---
 pytest
