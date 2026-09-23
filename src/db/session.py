@@ -6,12 +6,18 @@ Security requirements).
 Expected env vars (see .env.example):
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 """
+
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from db.models import Base
+from .models import Base
+
+
+# Load variables from .env
+load_dotenv()
 
 
 def get_database_url() -> str:
