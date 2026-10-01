@@ -11,6 +11,8 @@ Usage:
 import argparse
 from datetime import datetime
 
+import pandas as pd
+
 from dotenv import load_dotenv
 from sqlalchemy import and_, or_
 
@@ -119,6 +121,12 @@ def ingest_odds(session, year: int) -> int:
         )
 
         if game is None:
+            home_score = record.get("home_score")
+            away_score = record.get("away_score")
+
+            home_win = None
+            if home_score is not None and away_score is not None:
+                home_win = home_score > away_score
 
             game = Game(
                 home_team_id=home_team.team_id,
@@ -128,7 +136,12 @@ def ingest_odds(session, year: int) -> int:
                     if hasattr(game_date, "date")
                     else game_date
                 ),
+                home_score=home_score,
+                away_score=away_score,
+                home_win=home_win,
             )
+
+            session.add(game)
 
             session.add(game)
             session.flush()
@@ -209,6 +222,46 @@ def ingest_team_stats(session, year: int) -> int:
                 "%Y-%m-%d"
             ).date()
 
+        # ---------------------------------------------------------
+        # Get game result
+        # ---------------------------------------------------------
+
+        home_score = record.get(
+            "home_score"
+        )
+
+        away_score = record.get(
+            "away_score"
+        )
+
+        # CFBD/Pandas may represent missing scores as NaN.
+        # PostgreSQL integer columns need None instead.
+        if pd.isna(home_score):
+            home_score = None
+
+        if pd.isna(away_score):
+            away_score = None
+
+        home_win = None
+
+        if (
+                home_score is not None
+                and away_score is not None
+        ):
+            home_win = home_score > away_score
+
+        home_win = None
+
+        if (
+            home_score is not None
+            and away_score is not None
+        ):
+            home_win = home_score > away_score
+
+        # ---------------------------------------------------------
+        # Find existing game
+        # ---------------------------------------------------------
+
         game = (
             session.query(Game)
             .filter_by(
@@ -233,16 +286,36 @@ def ingest_team_stats(session, year: int) -> int:
             .first()
         )
 
+        # ---------------------------------------------------------
+        # Create or update game
+        # ---------------------------------------------------------
+
         if game is None:
 
             game = Game(
                 home_team_id=home_team.team_id,
                 away_team_id=away_team.team_id,
                 game_date=game_date,
+                home_score=home_score,
+                away_score=away_score,
+                home_win=home_win,
             )
 
             session.add(game)
-            session.flush()
+
+        else:
+
+            # Fill in/update the result for an existing game.
+            if home_score is not None:
+                game.home_score = home_score
+
+            if away_score is not None:
+                game.away_score = away_score
+
+            if home_win is not None:
+                game.home_win = home_win
+
+        session.flush()
 
         written += 1
 

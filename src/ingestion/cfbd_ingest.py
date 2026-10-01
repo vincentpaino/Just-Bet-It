@@ -43,7 +43,8 @@ def fetch_team_season_stats(year):
 
         games = games_api.get_games(
             year=year,
-            classification="fbs"
+            classification="fbs",
+            season_type="both"
         )
 
     if not games:
@@ -133,32 +134,32 @@ def fetch_qb_season_stats(year):
         # ---------------------------------------------------------
 
         player_game_stats = []
+        # Get the actual weeks present in the season, including postseason.
+        # This avoids assuming every season has exactly 15 weeks.
+        weeks = sorted(
+            {
+                game_data.week
+                for game_data in games
+                if game_data.week is not None
+            }
+        )
 
-        for week in range(1, 16):
+        print(f"Fetching QB stats for weeks: {weeks}")
 
+        for week in weeks:
             try:
-                weekly_stats = (
-                    games_api.get_game_player_stats(
-                        year=year,
-                        week=week
-                    )
+                weekly_stats = games_api.get_game_player_stats(
+                    year=year,
+                    week=week,
+                    season_type="both"
                 )
-
-                player_game_stats.extend(
-                    weekly_stats
-                )
-
+                player_game_stats.extend(weekly_stats)
                 print(
-                    f"[cfbd_qb] Week {week}: "
-                    f"{len(weekly_stats)} games"
+                    f"Week {week}: fetched {len(weekly_stats)} "
+                    f"player-game stat records"
                 )
-
             except Exception as exc:
-                print(
-                    f"[cfbd_qb] Week {week}: "
-                    f"unavailable ({exc})"
-                )
-
+                print(f"Week {week}: failed to fetch player stats: {exc}")
         # ---------------------------------------------------------
         # 4. Flatten the nested CFBD response
         # ---------------------------------------------------------
