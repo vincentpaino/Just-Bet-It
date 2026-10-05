@@ -58,6 +58,14 @@ class Game(Base):
     away_score = Column(Integer)
     home_win = Column(Boolean)
 
+    cfbd_game_id = Column(BigInteger, unique=True)
+    start_time = Column(DateTime(timezone=True))
+    start_time_tbd = Column(Boolean)
+    season = Column(Integer)
+    week = Column(Integer)
+    season_type = Column(String(20))
+    neutral_site = Column(Boolean)
+
     home_team = relationship(
         "Team",
         foreign_keys=[home_team_id],
@@ -77,6 +85,14 @@ class Game(Base):
     )
     qb_stats = relationship(
         "QBGameStat",
+        back_populates="game",
+    )
+    qb_game_features = relationship(
+        "QBGameFeature",
+        back_populates="game",
+    )
+    qb_prop_lines = relationship(
+        "QBPropLine",
         back_populates="game",
     )
 
@@ -323,3 +339,118 @@ class QBGameStat(Base):
         "Team",
         foreign_keys=[opponent_team_id],
     )
+
+    class QBGameFeature(Base):
+        """
+        One row per QB per game: pregame features + the passing-yards target.
+        Every feature column must be computed using only games BEFORE this one.
+        """
+        __tablename__ = "qb_game_features"
+        __table_args__ = (
+            UniqueConstraint(
+                "game_id",
+                "player_id",
+                name="uq_qb_feature_game_player",
+            ),
+        )
+
+        id = Column(Integer, primary_key=True)
+
+        game_id = Column(
+            Integer,
+            ForeignKey(
+                "games.game_id",
+                ondelete="CASCADE",
+            ),
+            nullable=False,
+        )
+        player_id = Column(BigInteger, nullable=False)
+        player_name = Column(String(100), nullable=False)
+        team_id = Column(
+            Integer,
+            ForeignKey("teams.team_id"),
+            nullable=False,
+        )
+        opponent_team_id = Column(
+            Integer,
+            ForeignKey("teams.team_id"),
+        )
+
+        # Context
+        season = Column(Integer)
+        game_date = Column(Date, nullable=False)
+        is_home = Column(Boolean)
+        rest_days = Column(Integer)
+
+        # Target (NULL for upcoming games)
+        passing_yards = Column(Integer)
+
+        # Pregame QB features (prior games only)
+        games_played_prior = Column(Integer)
+        avg_pass_yds_last3 = Column(Numeric(6, 2))
+        avg_pass_yds_last5 = Column(Numeric(6, 2))
+        avg_pass_yds_season = Column(Numeric(6, 2))
+        avg_attempts_last5 = Column(Numeric(5, 2))
+        avg_ypa_last5 = Column(Numeric(4, 2))
+        avg_comp_pct_last5 = Column(Numeric(5, 2))
+        avg_rush_yds_last5 = Column(Numeric(6, 2))
+
+        # Pregame opponent / team features (prior games only)
+        opp_pass_yds_allowed_avg = Column(Numeric(6, 2))
+        team_pass_att_avg = Column(Numeric(5, 2))
+
+        created_at = Column(
+            DateTime,
+            nullable=False,
+            default=datetime.utcnow,
+        )
+
+        game = relationship(
+            "Game",
+            back_populates="qb_game_features",
+        )
+
+    class QBPropLine(Base):
+        """
+        Sportsbook passing-yards line for a QB in a game.
+        Snapshot table: the same line can move, so fetched_at is part of the key.
+        """
+        __tablename__ = "qb_prop_lines"
+        __table_args__ = (
+            UniqueConstraint(
+                "game_id",
+                "player_id",
+                "sportsbook",
+                "fetched_at",
+                name="uq_qb_prop_snapshot",
+            ),
+        )
+
+        id = Column(Integer, primary_key=True)
+
+        game_id = Column(
+            Integer,
+            ForeignKey(
+                "games.game_id",
+                ondelete="CASCADE",
+            ),
+            nullable=False,
+        )
+        player_id = Column(BigInteger)  # may be NULL until names are matched to CFBD IDs
+        player_name = Column(String(100), nullable=False)
+        sportsbook = Column(String(100), nullable=False)
+
+        line = Column(Numeric(6, 1), nullable=False)  # e.g. 245.5
+        over_odds = Column(Numeric(8, 2))
+        under_odds = Column(Numeric(8, 2))
+
+        fetched_at = Column(
+            DateTime,
+            nullable=False,
+            default=datetime.utcnow,
+        )
+
+        game = relationship(
+            "Game",
+            back_populates="qb_prop_lines",
+        )

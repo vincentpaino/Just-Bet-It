@@ -8,9 +8,11 @@ Expected env vars (see .env.example):
 """
 
 import os
+from contextlib import contextmanager
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker
 
 from .models import Base
@@ -20,13 +22,16 @@ from .models import Base
 load_dotenv()
 
 
-def get_database_url() -> str:
-    host = os.environ.get("DB_HOST", "localhost")
-    port = os.environ.get("DB_PORT", "5432")
-    name = os.environ.get("DB_NAME", "just_bet_it")
-    user = os.environ.get("DB_USER", "postgres")
-    password = os.environ.get("DB_PASSWORD", "")
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
+def get_database_url() -> URL:
+    # URL.create escapes special characters (@, /, :) in the password
+    return URL.create(
+        drivername="postgresql+psycopg2",
+        username=os.environ.get("DB_USER", "postgres"),
+        password=os.environ.get("DB_PASSWORD", "") or None,
+        host=os.environ.get("DB_HOST", "localhost"),
+        port=int(os.environ.get("DB_PORT", "5432")),
+        database=os.environ.get("DB_NAME", "just_bet_it"),
+    )
 
 
 engine = create_engine(get_database_url(), pool_pre_ping=True)
@@ -39,6 +44,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+@contextmanager
 def get_session():
     """Yield a session, closing it afterward. Use as a context manager:
         with get_session() as session:
