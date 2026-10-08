@@ -1,6 +1,6 @@
 """
 SQLAlchemy ORM models for Just Bet It.
-Mirrors db/schema.sql — keep the two in sync.
+Mirrors db/schema.sql but in object, code form — keep the two in sync.
 """
 
 from datetime import datetime
