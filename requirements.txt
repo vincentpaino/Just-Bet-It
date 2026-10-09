@@ -19,3 +19,6 @@ requests
 cfbd
 # --- Testing ---
 pytest
+
+# --- Exploratory Data Analysis (EDA) ---
+matplotlib>=3.5
