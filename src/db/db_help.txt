@@ -2,14 +2,20 @@ To connect and view the PostreSQL data, use this CLI command:
 
 psql -h localhost -p 5432 -U <user-name> -d just_bet_it
 
+Or, you could stay in the virtual environment and access data like this (print results and exists):
+
+psql -d just_bet_it -c "<command>"
+
+psql -d just_bet_it -c "SELECT COUNT(*) FROM games; SELECT * FROM games LIMIT 10;"
+
 From here, you can use various commands like this:
 
-just_bit_it=# <insert-command-here>
+just_bet_it=# <insert-command-here>
 
-List of commands:
+List of useful commands:
 
     dt                              -- confirm the six tables exist
-    \d games                         -- column names and types
+    \d <table-name>                 -- column/feature names and types
     SELECT COUNT(*) FROM games;
     SELECT * FROM games LIMIT 10;
     \x auto                          -- switches to vertical output when rows are wide
