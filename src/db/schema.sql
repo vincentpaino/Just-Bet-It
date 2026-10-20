@@ -25,6 +25,13 @@ CREATE TABLE IF NOT EXISTS games (
     home_score    INTEGER,
     away_score    INTEGER,
     home_win      BOOLEAN,
+    cfbd_game_id   BIGINT UNIQUE,
+    start_time     TIMESTAMPTZ,
+    start_time_tbd BOOLEAN,
+    season         INTEGER,
+    week           INTEGER,
+    season_type    VARCHAR(20),
+    neutral_site   BOOLEAN,
     CONSTRAINT chk_different_teams CHECK (home_team_id <> away_team_id)
 );
 
