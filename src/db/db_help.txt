@@ -8,6 +8,8 @@ psql -d just_bet_it -c "<command>"
 
 psql -d just_bet_it -c "SELECT COUNT(*) FROM games; SELECT * FROM games LIMIT 10;"
 
+psql -d just_bet_it -c "SELECT * FROM users WHERE username = 'alice';"
+
 From here, you can use various commands like this:
 
 just_bet_it=# <insert-command-here>
@@ -19,3 +21,6 @@ List of useful commands:
     SELECT COUNT(*) FROM games;
     SELECT * FROM games LIMIT 10;
     \x auto                          -- switches to vertical output when rows are wide
+
+Other Notes:
+The "qb_game_features" table is where the engineered features live
