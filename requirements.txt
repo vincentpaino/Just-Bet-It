@@ -10,7 +10,7 @@ alembic
 
 # --- ML ---
 scikit-learn
-xgboost
+xgboost # brew install libomp -- installs OpenMP runtime needed for this library
 optuna
 
 # --- Data sources ---
