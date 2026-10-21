@@ -11,6 +11,7 @@
 # Run from the project root:  python xgboost_sklearn.py
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,8 @@ from sqlalchemy.engine import URL
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    ENV_PATH = Path(__file__).resolve().parent.parent / "src" / ".env"
+    load_dotenv(ENV_PATH)
 except ImportError:
     pass
 
