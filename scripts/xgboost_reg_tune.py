@@ -1,7 +1,7 @@
 # Hyperparameter tuning using Optuna for the QB passing-yards XGBRegressor.
 #
-# Put this next to xgboost_sklearn.py (in scripts/) and run:
-#     python3 scripts/tune_xgboost.py
+# Lives next to xgboost_reg.py (in scripts/). Run from the project root:
+#     python3 scripts/xgboost_reg_tune.py
 #
 # How it avoids cheating:
 #   * The test set (most recent TEST_FRACTION of games) is NEVER used while tuning.
@@ -20,6 +20,8 @@ from sklearn.model_selection import TimeSeriesSplit
 
 # Reuse the data loading / feature engineering from the main script and other globals.
 from xgboost_reg import (
+    BEST_PARAMS_PATH,
+    DEFAULT_PARAMS,
     FEATURES,
     TEST_FRACTION,
     build_features,
@@ -30,7 +32,6 @@ from xgboost_reg import (
 
 N_TRIALS = 100   # more trials = better search but slower
 N_SPLITS = 4    # number of time-series CV folds
-BEST_PARAMS_PATH = Path(__file__).resolve().parent / "best_params.json"
 
 
 def make_model(params: dict) -> xgb.XGBRegressor:
@@ -71,7 +72,7 @@ def objective(trial: optuna.Trial, X, y) -> float:
 
 
 if __name__ == "__main__":
-    # Same data prep and date split as xgboost_sklearn.py
+    # Same data prep and date split as xgboost_reg.py
     data = filter_trainable(build_features(load_qb_games()))
     data = data.sort_values("game_date").reset_index(drop=True)
     cutoff = data["game_date"].quantile(1 - TEST_FRACTION)
@@ -96,11 +97,10 @@ if __name__ == "__main__":
         print(f"  {k}: {v}")
 
     BEST_PARAMS_PATH.write_text(json.dumps(study.best_params, indent=2))
-    print(f"\nSaved to {BEST_PARAMS_PATH}")
+    print(f"\nSaved to {BEST_PARAMS_PATH} (scripts/xgboost_reg.py uses it from now on)")
 
     # One-time test evaluation: tuned vs. your original hand-picked settings
-    default_params = {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.05}
-    for label, params in [("Default (hand-picked)", default_params), ("Optuna-tuned", study.best_params)]:
+    for label, params in [("Default (hand-picked)", DEFAULT_PARAMS), ("Optuna-tuned", study.best_params)]:
         model = make_model(params)
         model.fit(X_train, y_train)
         pred = model.predict(X_test)

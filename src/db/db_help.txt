@@ -1,3 +1,12 @@
+Shared team database (Neon): connect with the connection string from your
+.env (DATABASE_URL), in quotes:
+
+psql "postgresql://user:password@ep-xxxx.neon.tech/neondb?sslmode=require"
+
+Tip: `export DATABASE_URL=...` in your terminal, then use psql "$DATABASE_URL".
+
+Local database:
+
 To connect and view the PostreSQL data, use this CLI command:
 
 psql -h localhost -p 5432 -U <user-name> -d just_bet_it

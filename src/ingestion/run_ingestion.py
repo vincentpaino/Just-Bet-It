@@ -4,7 +4,12 @@ Mirrors the ingest_data() pseudocode from Doc II Section 3.3 / Doc III
 Section 4.3 — pulls odds, pulls historical stats, logs the run.
 
 Usage:
-    python -m src.ingestion.run_ingestion --year 2026
+    python -m src.ingestion.run_ingestion --year 2026          # CFBD games + QB stats
+    python -m src.ingestion.run_ingestion --props               # ...plus QB prop lines
+    python -m src.ingestion.run_ingestion --odds --skip-stats --skip-qb   # game odds only
+
+The Odds API steps (--odds, --props) are opt-in because the free tier has
+only 500 credits a month; see scripts/snapshot_odds.sh for the weekly job.
 
 Games are matched by their CFBD game ID. Older rows that predate the ID
 column are found by matchup + date, then stamped with the ID and given the
@@ -15,7 +20,9 @@ attach to games by CFBD game ID.
 """
 
 import argparse
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
+from functools import partial
 
 from dotenv import load_dotenv
 from sqlalchemy import and_, or_
@@ -27,19 +34,31 @@ from src.db.models import (
     Team,
     Odds,
     QBGameStat,
+    QBPropLine,
     Game,
 )
 
 from src.db.session import SessionLocal, init_db
 
-from .dates import to_game_date, utc_date
+from .dates import as_utc_datetime, to_game_date, utc_date
 
 from .odds_api import (
+    fetch_event_props,
+    fetch_events,
     fetch_odds,
+    swap_home_away,
     validate_and_format as validate_odds,
+    validate_and_format_props,
+)
+
+from .team_names import (
+    build_odds_name_map,
+    normalize,
+    resolve_odds_team_name,
 )
 
 from .cfbd_ingest import (
+    fetch_teams,
     fetch_team_season_stats,
     fetch_qb_season_stats,
     validate_and_format as validate_stats,
@@ -147,53 +166,107 @@ def _apply_result(game, cfbd_home_team_id, home_score, away_score) -> bool:
 # Odds
 # ---------------------------------------------------------------------------
 
+def _load_odds_name_map() -> dict[str, str]:
+    """
+    Odds API name -> CFBD school lookup. If CFBD can't be reached, fall back
+    to the manual overrides so the odds snapshot (which can't be re-fetched
+    later) is still saved; unresolved names can be merged afterwards with
+    scripts/merge_odds_teams.py.
+    """
+
+    try:
+        return build_odds_name_map(fetch_teams())
+    except Exception as exc:
+        print(f"[odds] WARNING: could not load CFBD teams ({exc}); "
+              f"Odds API names may not match CFBD teams this run")
+        return build_odds_name_map([])  # manual overrides only
+
+
+class _OddsTeamResolver:
+    """Maps Odds API team names to Team rows, remembering names it couldn't map."""
+
+    def __init__(self, session):
+        self.session = session
+        self.name_map = _load_odds_name_map()
+        self.unresolved = set()
+
+    def __call__(self, odds_name: str) -> Team:
+        school = resolve_odds_team_name(odds_name, self.name_map)
+        if school is None:
+            self.unresolved.add(odds_name)
+        return _get_or_create_team(self.session, school or odds_name)
+
+    def warn_unresolved(self, label: str):
+        if self.unresolved:
+            print(f"[{label}] WARNING: no CFBD match for {sorted(self.unresolved)}; "
+                  f"stored under the Odds API name. Add them to "
+                  f"ODDS_NAME_OVERRIDES in team_names.py.")
+
+
+def _find_or_create_odds_game(session, home_team: Team, away_team: Team, kickoff):
+    """
+    The game an Odds API event refers to. If CFBD ingestion hasn't created it
+    yet, create a placeholder; the next CFBD run adopts it (matchup + date).
+    Returns None if the kickoff time can't be parsed.
+    """
+
+    local_date = to_game_date(kickoff)
+
+    if local_date is None:
+        return None
+
+    game = _find_game_by_matchup(
+        session,
+        home_team.team_id,
+        away_team.team_id,
+        [local_date, utc_date(kickoff)],
+    )
+
+    if game is None:
+        game = Game(
+            home_team_id=home_team.team_id,
+            away_team_id=away_team.team_id,
+            game_date=local_date,
+        )
+        session.add(game)
+        session.flush()
+
+    return game
+
+
 def ingest_odds(session, year: int) -> int:
-    """Fetch and store sportsbook odds."""
+    """
+    Fetch and store sportsbook odds.
+
+    Odds API team names are mapped to CFBD school names so odds attach to the
+    games CFBD ingestion created. Odds are stored from the game row's home
+    side, so they are flipped when the Odds API lists the teams reversed.
+    Every run adds a new snapshot (fetched_at), so line movement is kept.
+    """
 
     raw_data = fetch_odds()
 
     records = validate_odds(raw_data)
 
-    written = 0
+    team_for = _OddsTeamResolver(session)
+
+    written = flipped = 0
 
     for record in records:
 
-        raw_date = record.get("game_date")
+        home_team = team_for(record["home_team"])
+        away_team = team_for(record["away_team"])
 
-        local_date = to_game_date(raw_date)
-
-        if local_date is None:
-            continue
-
-        home_team = _get_or_create_team(session, record["home_team"])
-        away_team = _get_or_create_team(session, record["away_team"])
-
-        game = _find_game_by_matchup(
-            session,
-            home_team.team_id,
-            away_team.team_id,
-            [local_date, utc_date(raw_date)],
+        game = _find_or_create_odds_game(
+            session, home_team, away_team, record.get("game_date")
         )
 
         if game is None:
-            home_score = record.get("home_score")
-            away_score = record.get("away_score")
+            continue
 
-            home_win = None
-            if home_score is not None and away_score is not None:
-                home_win = home_score > away_score
-
-            game = Game(
-                home_team_id=home_team.team_id,
-                away_team_id=away_team.team_id,
-                game_date=local_date,
-                home_score=home_score,
-                away_score=away_score,
-                home_win=home_win,
-            )
-
-            session.add(game)
-            session.flush()
+        if game.home_team_id != home_team.team_id:
+            record = swap_home_away(record)
+            flipped += 1
 
         session.add(
             Odds(
@@ -212,6 +285,173 @@ def ingest_odds(session, year: int) -> int:
         written += 1
 
     session.commit()
+
+    if flipped:
+        print(f"[odds] {flipped} rows flipped to match the stored game's home/away")
+
+    team_for.warn_unresolved("odds")
+
+    return written
+
+
+# ---------------------------------------------------------------------------
+# QB passing-yards props
+# ---------------------------------------------------------------------------
+
+# Props cost 1 Odds API credit per game whose props are posted (empty
+# responses and the events list are free). These limits keep a run from
+# wasting credits:
+PROPS_WINDOW_HOURS = 24     # only games kicking off within this many hours
+PROPS_REFETCH_HOURS = 20    # skip games already snapshotted this recently
+PROPS_CREDIT_RESERVE = 50   # never let a run take remaining credits below this
+PROPS_MAX_GAMES = 100       # hard cap on paid requests per run
+
+_NAME_SUFFIXES = re.compile(r"\b(jr|sr|ii|iii|iv|v)\b\.?", re.IGNORECASE)
+
+
+def _player_key(name: str) -> str:
+    """Compare player names ignoring case, punctuation and Jr./III suffixes."""
+    return normalize(_NAME_SUFFIXES.sub("", name or ""))
+
+
+def _qb_ids_by_name(session, team_ids) -> dict[str, int]:
+    """{player name key: CFBD player_id} for QBs who have played for these teams."""
+
+    rows = (
+        session.query(QBGameStat.player_name, QBGameStat.player_id)
+        .filter(QBGameStat.team_id.in_(team_ids))
+        .order_by(QBGameStat.game_date.desc())
+    )
+
+    ids = {}
+    for name, player_id in rows:
+        ids.setdefault(_player_key(name), player_id)  # most recent wins
+    return ids
+
+
+def ingest_qb_props(
+    session,
+    year: int,
+    window_hours: int = PROPS_WINDOW_HOURS,
+    credit_reserve: int = PROPS_CREDIT_RESERVE,
+    max_games: int = PROPS_MAX_GAMES,
+) -> int:
+    """
+    Snapshot QB passing-yards prop lines for games kicking off in the next
+    `window_hours`. Lines are matched to CFBD player IDs by name among the
+    two teams' QBs; unmatched players are stored with player_id NULL.
+
+    Credit safety: games snapshotted in the last PROPS_REFETCH_HOURS are
+    skipped (so re-running costs nothing), requests stop before remaining
+    credits would drop below `credit_reserve`, and at most `max_games` paid
+    requests are made. Each game is committed as it's fetched, so credits
+    already spent aren't lost if a later request fails.
+    """
+
+    now = datetime.now(timezone.utc)
+    cutoff = now + timedelta(hours=window_hours)
+    recent = now.replace(tzinfo=None) - timedelta(hours=PROPS_REFETCH_HOURS)
+
+    all_events, remaining = fetch_events()
+    start_remaining = remaining
+
+    events = sorted(
+        (e for e in all_events if now < as_utc_datetime(e["commence_time"]) <= cutoff),
+        key=lambda e: e["commence_time"],
+    )
+
+    print(f"[props] {len(events)} games kick off in the next {window_hours}h; "
+          f"{remaining if remaining is not None else 'unknown'} credits remaining")
+
+    team_for = _OddsTeamResolver(session)
+
+    written = unmatched_players = requested = 0
+    already_captured = no_props = 0
+    skipped_for_budget = []
+
+    for event in events:
+
+        home_team = team_for(event["home_team"])
+        away_team = team_for(event["away_team"])
+
+        game = _find_or_create_odds_game(
+            session, home_team, away_team, event["commence_time"]
+        )
+
+        if game is None:
+            continue
+
+        captured = (
+            session.query(QBPropLine.id)
+            .filter(QBPropLine.game_id == game.game_id)
+            .filter(QBPropLine.fetched_at >= recent)
+            .first()
+        )
+
+        if captured:
+            already_captured += 1
+            continue
+
+        # Worst case this request costs 1 credit.
+        if requested >= max_games or (
+            remaining is not None and remaining - 1 < credit_reserve
+        ):
+            skipped_for_budget.append(f"{event['away_team']} @ {event['home_team']}")
+            continue
+
+        data, after = fetch_event_props(event["id"])
+        requested += 1
+        remaining = after if after is not None else remaining
+
+        records = validate_and_format_props(data)
+
+        if not records:
+            no_props += 1
+            session.commit()  # keep any placeholder game created above
+            continue
+
+        qb_ids = _qb_ids_by_name(session, [home_team.team_id, away_team.team_id])
+
+        for record in records:
+            player_id = qb_ids.get(_player_key(record["player_name"]))
+            unmatched_players += player_id is None
+
+            session.add(
+                QBPropLine(
+                    game_id=game.game_id,
+                    player_id=player_id,
+                    player_name=record["player_name"],
+                    sportsbook=record["sportsbook"],
+                    line=record["line"],
+                    over_odds=record["over_odds"],
+                    under_odds=record["under_odds"],
+                    fetched_at=record["fetched_at"],
+                )
+            )
+            written += 1
+
+        session.commit()
+
+    session.commit()
+
+    used = (
+        start_remaining - remaining
+        if start_remaining is not None and remaining is not None else "unknown"
+    )
+    print(f"[props] requested {requested} games ({no_props} had no props yet, free); "
+          f"skipped {already_captured} already captured in the last "
+          f"{PROPS_REFETCH_HOURS}h; credits used: {used}, remaining: {remaining}")
+
+    if skipped_for_budget:
+        print(f"[props] WARNING: skipped {len(skipped_for_budget)} games to stay above "
+              f"the {credit_reserve}-credit reserve / {max_games}-game cap: "
+              f"{skipped_for_budget}")
+
+    if unmatched_players:
+        print(f"[props] {unmatched_players} lines had no matching CFBD QB "
+              f"(stored with player_id NULL)")
+
+    team_for.warn_unresolved("props")
 
     return written
 
@@ -524,10 +764,18 @@ def main():
         help="Season year to ingest.",
     )
 
+    # Both Odds API steps are opt-in so a normal ingestion run never spends
+    # the team's limited Odds API credits.
+    parser.add_argument(
+        "--odds",
+        action="store_true",
+        help="Also snapshot game odds: moneyline, spread, total (3 Odds API credits).",
+    )
+
     parser.add_argument(
         "--skip-odds",
         action="store_true",
-        help="Skip odds ingestion.",
+        help=argparse.SUPPRESS,  # old flag; odds are now off unless --odds
     )
 
     parser.add_argument(
@@ -542,6 +790,34 @@ def main():
         help="Skip QB stats ingestion.",
     )
 
+    parser.add_argument(
+        "--props",
+        action="store_true",
+        help="Also snapshot QB passing-yards prop lines for upcoming games "
+             "(costs 1 Odds API credit per game).",
+    )
+
+    parser.add_argument(
+        "--props-window-hours",
+        type=int,
+        default=PROPS_WINDOW_HOURS,
+        help="With --props, only fetch games kicking off within this many hours.",
+    )
+
+    parser.add_argument(
+        "--props-credit-reserve",
+        type=int,
+        default=PROPS_CREDIT_RESERVE,
+        help="With --props, stop before remaining Odds API credits drop below this.",
+    )
+
+    parser.add_argument(
+        "--props-max-games",
+        type=int,
+        default=PROPS_MAX_GAMES,
+        help="With --props, make at most this many paid requests.",
+    )
+
     args = parser.parse_args()
 
     init_db()
@@ -550,7 +826,7 @@ def main():
 
     try:
 
-        if not args.skip_odds:
+        if args.odds:
             _run_step(session, "odds", "odds", ingest_odds, args.year)
 
         if not args.skip_stats:
@@ -563,6 +839,18 @@ def main():
             _run_step(
                 session, "cfbd_qb", "cfbd_qb",
                 ingest_qb_stats, args.year,
+            )
+
+        if args.props:
+            _run_step(
+                session, "props", "odds_props",
+                partial(
+                    ingest_qb_props,
+                    window_hours=args.props_window_hours,
+                    credit_reserve=args.props_credit_reserve,
+                    max_games=args.props_max_games,
+                ),
+                args.year,
             )
 
     finally:

@@ -1,10 +1,11 @@
 """
 Quick Exploratory Data Analysis (EDA) for Just Bet It. Run from the project root:
 
-    python explore_data.py
+    python -m src.db.explore_data
 
 Prints a report to the terminal and saves plots to ./eda_output/.
-Uses the same DB_* environment variables as your app (reads .env if python-dotenv is installed).
+Connects through src/db/session.py, so it uses the same database as the rest
+of the app (the shared DATABASE_URL or local DB_* settings in .env).
 """
 import os
 
@@ -14,27 +15,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
+from sqlalchemy import text
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
-
-# Same logic as your get_database_url(); swap for an import from your module if you prefer.
-engine = create_engine(
-    URL.create(
-        drivername="postgresql+psycopg2",
-        username=os.environ.get("DB_USER", "postgres"),
-        password=os.environ.get("DB_PASSWORD", "") or None,
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5432")),
-        database=os.environ.get("DB_NAME", "just_bet_it"),
-    )
-)
+from src.db.session import engine
 
 os.makedirs("eda_output", exist_ok=True)
 pd.set_option("display.width", 200)

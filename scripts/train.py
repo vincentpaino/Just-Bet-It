@@ -387,9 +387,10 @@ def evaluate_models(y_test, predictions):
     return results
 
 
-def save_models(models, feature_names, output_dir='models'):
+def save_models(models, feature_names, train_end, output_dir='models'):
     """
-    Save trained models to disk.
+    Save trained models to disk, plus the date of the last training game so
+    scripts/backtest.py only scores games the models never trained on.
     """
     import os
     os.makedirs(output_dir, exist_ok=True)
@@ -405,6 +406,10 @@ def save_models(models, feature_names, output_dir='models'):
     feature_path = f"{output_dir}/feature_names.pkl"
     joblib.dump(feature_names, feature_path)
     print(f"Saved feature names to {feature_path}")
+
+    info_path = f"{output_dir}/training_info.pkl"
+    joblib.dump({'train_end': train_end}, info_path)
+    print(f"Saved training info to {info_path} (trained through {train_end.date()})")
 
 
 def main():
@@ -456,7 +461,9 @@ def main():
         X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
         y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
-        print(f"\nTrain set: {len(X_train)} samples")
+        train_end = df_features['game_date'].iloc[split_idx - 1]
+
+        print(f"\nTrain set: {len(X_train)} samples (through {train_end.date()})")
         print(f"Test set: {len(X_test)} samples")
 
         if not args.skip_training:
@@ -468,7 +475,7 @@ def main():
 
             # Save models
             print(f"\nSaving models to {args.output_dir}/...")
-            save_models(models, feature_names, args.output_dir)
+            save_models(models, feature_names, train_end, args.output_dir)
 
             print("\nTraining complete!")
         else:

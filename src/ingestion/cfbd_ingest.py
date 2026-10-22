@@ -112,6 +112,22 @@ def _fetch_games(games_api, year):
 
 
 # ---------------------------------------------------------------------------
+# Teams
+# ---------------------------------------------------------------------------
+
+def fetch_teams():
+    """
+    Fetch every CFBD team as a plain dict (school, mascot, alternateNames, ...).
+    Used to map other sources' team names onto CFBD school names.
+    """
+
+    with _get_api_client() as api_client:
+        teams = cfbd.TeamsApi(api_client).get_teams()
+
+    return [team.to_dict() for team in teams]
+
+
+# ---------------------------------------------------------------------------
 # Games
 # ---------------------------------------------------------------------------
 

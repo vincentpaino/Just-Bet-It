@@ -8,42 +8,38 @@
 #   4. Split by DATE (train on the past, test on the future)
 #   5. Train XGBRegressor and compare it against simple baselines
 #
-# Run from the project root:  python xgboost_sklearn.py
+# Run from the project root:  python scripts/xgboost_reg.py
 
-import os
+import json
+import sys
+from datetime import datetime
 from pathlib import Path
+
+import joblib
 
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-from sqlalchemy import create_engine
-from sqlalchemy.engine import URL
 
-try:
-    from dotenv import load_dotenv
+# Run as a script, Python only puts scripts/ on the import path; add the
+# project root so the shared database connection in src/ can be imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-    ENV_PATH = Path(__file__).resolve().parent.parent / "src" / ".env"
-    load_dotenv(ENV_PATH)
-except ImportError:
-    pass
+from src.db.session import engine  # local DB or shared DATABASE_URL, via .env
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = PROJECT_ROOT / "models" / "xgboost_reg.pkl"          # read by scripts/backtest.py
+BEST_PARAMS_PATH = PROJECT_ROOT / "configs" / "xgboost_reg_params.json"  # written by xgboost_reg_tune.py
+
+# Hand-picked settings, used until the tuning script has written best_params.json
+DEFAULT_PARAMS = {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.05}
 
 # Global variables
 seed = 42
 MIN_ATTEMPTS = 10      # ignore garbage-time backups / trick-play "QBs"
 MIN_PRIOR_GAMES = 3    # need some history before we trust rolling averages
 TEST_FRACTION = 0.2    # most recent 20% of games (by date) become the test set
-
-engine = create_engine(
-    URL.create(
-        drivername="postgresql+psycopg2",
-        username=os.environ.get("DB_USER", "postgres"),
-        password=os.environ.get("DB_PASSWORD", "") or None,
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5432")),
-        database=os.environ.get("DB_NAME", "just_bet_it"),
-    )
-)
 
 
 # ----------------------------------------------------------------------------
@@ -172,15 +168,24 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
 # ----------------------------------------------------------------------------
 # 3. Filter (in memory only -- the DB is untouched)
 # ----------------------------------------------------------------------------
+def has_history(qb: pd.DataFrame) -> pd.Series:
+    """Rows with enough prior games for the core rolling feature. Used for
+    training here and for picking predictable games in scripts/backtest.py."""
+    return qb["avg_pass_yds_last5"].notna() & (qb["games_played_prior"] >= MIN_PRIOR_GAMES)
+
+
 def filter_trainable(qb: pd.DataFrame) -> pd.DataFrame:
     # We must have a target and enough history for the core rolling feature.
     # Other feature NaNs are left alone: XGBoost handles missing values natively.
-    ok = (
-        qb["passing_yards"].notna()
-        & qb["avg_pass_yds_last5"].notna()
-        & (qb["games_played_prior"] >= MIN_PRIOR_GAMES)
-    )
+    ok = qb["passing_yards"].notna() & has_history(qb)
     return qb[ok].copy()
+
+
+def load_params() -> tuple[dict, str]:
+    """Tuned hyperparameters if the tuning script has saved them, else the defaults."""
+    if BEST_PARAMS_PATH.exists():
+        return json.loads(BEST_PARAMS_PATH.read_text()), f"tuned ({BEST_PARAMS_PATH.name})"
+    return dict(DEFAULT_PARAMS), "hand-picked defaults"
 
 
 # ----------------------------------------------------------------------------
@@ -226,12 +231,12 @@ if __name__ == "__main__":
     X_test, y_test = test[FEATURES], test["passing_yards"]
 
     # 3. Initialize the Regressor model
+    params, params_source = load_params()
+    print(f"\nHyperparameters: {params_source}")
     reg_model = xgb.XGBRegressor(
-        n_estimators=100,
-        max_depth=4,
-        learning_rate=0.05,
         objective="reg:squarederror",  # Default loss for regression
         random_state=seed,
+        **params,
     )
 
     # 4. Train and predict
@@ -270,3 +275,18 @@ if __name__ == "__main__":
         ["game_date", "player_name", "passing_yards", "predicted", "avg_pass_yds_last5"]
     ]
     print(sample.head(15).to_string(index=False))
+
+    # 6. Save the model for scripts/backtest.py. train_end is recorded so the
+    #    backtest only scores games the model never trained on.
+    MODEL_PATH.parent.mkdir(exist_ok=True)
+    joblib.dump(
+        {
+            "model": reg_model,
+            "features": FEATURES,
+            "train_end": cutoff,
+            "params": params,
+            "trained_at": datetime.now(),
+        },
+        MODEL_PATH,
+    )
+    print(f"\nSaved model to {MODEL_PATH.relative_to(PROJECT_ROOT)} (trained through {cutoff.date()})")

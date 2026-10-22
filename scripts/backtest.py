@@ -1,6 +1,11 @@
 """
 QB Passing Yards Model Backtesting Script.
-Evaluates model performance on historical data and simulates betting strategy.
+Scores the trained models against real sportsbook closing lines stored in
+qb_prop_lines (captured by `run_ingestion --props`) and simulates flat
+1-unit over/under bets at the books' actual prices.
+
+Only games with both a stored pregame line and a final CFBD stat line are
+scored, so the sample grows as the daily snapshots accumulate.
 """
 import argparse
 import sys
@@ -12,7 +17,7 @@ import pandas as pd
 
 from src.db.models import QBGameStat, Game, Team, Odds
 from src.db.session import SessionLocal, init_db
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, text
 
 
 def load_models(model_dir='models'):
@@ -143,7 +148,7 @@ def prepare_features_for_backtest(df, feature_names):
     return X
 
 
-def get_historical_qb_data(session, start_year=2015, end_year=2022):
+def get_historical_qb_data(session, start_year, end_year):
     """
     Get historical QB game data for backtesting.
     """
@@ -175,6 +180,7 @@ def get_historical_qb_data(session, start_year=2015, end_year=2022):
             'passing_yards': r.QBGameStat.passing_yards,
 
             # QB basic info
+            'game_id': r.QBGameStat.game_id,
             'qb_id': r.QBGameStat.player_id,
             'qb_name': r.QBGameStat.player_name,
             'team_id': r.QBGameStat.team_id,
@@ -210,89 +216,178 @@ def get_historical_qb_data(session, start_year=2015, end_year=2022):
     return df
 
 
-def simulate_betting_strategy(predictions, actual_yards, lines, kelly_fraction=0.5):
+def load_closing_prop_lines(session):
     """
-    Simulate betting strategy using Kelly Criterion.
+    One closing passing-yards line per (game, QB), with real prices:
+      1. each book's last snapshot taken before kickoff,
+      2. that book's main line (books also post alternates): the one whose
+         over and under are priced closest to even,
+      3. the book whose main line is nearest the consensus (median) line.
+    Only lines with both sides priced and a known CFBD player ID are used.
+    """
+    df = pd.read_sql(
+        text("""
+            SELECT p.game_id, p.player_id, p.sportsbook, p.line,
+                   p.over_odds, p.under_odds, p.fetched_at
+            FROM qb_prop_lines p
+            JOIN games g USING (game_id)
+            WHERE p.player_id IS NOT NULL
+              AND p.over_odds IS NOT NULL AND p.under_odds IS NOT NULL
+              AND g.start_time IS NOT NULL
+              AND p.fetched_at < (g.start_time AT TIME ZONE 'UTC')
+        """),
+        session.connection(),
+    )
+
+    if df.empty:
+        return df
+
+    for col in ['line', 'over_odds', 'under_odds']:
+        df[col] = pd.to_numeric(df[col])
+
+    keys = ['game_id', 'player_id']
+
+    # 1. Last pregame snapshot per book
+    last_fetch = df.groupby(keys + ['sportsbook'])['fetched_at'].transform('max')
+    df = df[df['fetched_at'] == last_fetch].copy()
+
+    # 2. Main line per book: smallest gap between over and under implied odds
+    def implied(price):
+        return np.where(price > 0, 100 / (price + 100), -price / (-price + 100))
+
+    df['price_gap'] = np.abs(implied(df['over_odds']) - implied(df['under_odds']))
+    df = df.sort_values('price_gap').drop_duplicates(keys + ['sportsbook'])
+
+    # 3. Book closest to the consensus line
+    df['consensus'] = df.groupby(keys)['line'].transform('median')
+    df['books'] = df.groupby(keys)['sportsbook'].transform('count')
+    df['distance'] = (df['line'] - df['consensus']).abs()
+    df = df.sort_values(['distance', 'sportsbook']).drop_duplicates(keys)
+
+    return df[keys + ['sportsbook', 'line', 'over_odds', 'under_odds', 'consensus', 'books']]
+
+
+def american_payout(price):
+    """Profit on a winning 1-unit stake at these American odds."""
+    price = np.asarray(price, dtype=float)
+    return np.where(price > 0, price / 100, 100 / np.abs(price))
+
+
+def simulate_betting_strategy(predictions, bets, edge_threshold=0.0):
+    """
+    Flat 1-unit bets against real closing lines: OVER when the prediction is
+    more than `edge_threshold` yards above the line, UNDER when it's more than
+    that below. Winners are paid at the book's actual price; a push returns
+    the stake.
 
     Args:
         predictions: Array of predicted passing yards
-        actual_yards: Array of actual passing yards
-        lines: Array of betting lines (over/under)
-        kelly_fraction: Fraction of Kelly to bet (0.5 = half-Kelly)
+        bets: DataFrame with passing_yards (actual), line, over_odds, under_odds
+        edge_threshold: Minimum |prediction - line| in yards to place a bet
 
     Returns:
         Dictionary with betting performance metrics
     """
-    predictions = np.array(predictions)
-    actual_yards = np.array(actual_yards)
-    lines = np.array(lines)
+    predictions = np.asarray(predictions, dtype=float)
+    actual = bets['passing_yards'].to_numpy(dtype=float)
+    lines = bets['line'].to_numpy(dtype=float)
 
-    # Calculate edge (prediction - line)
     edges = predictions - lines
+    bet_over = edges > edge_threshold
+    bet_under = edges < -edge_threshold
+    placed = bet_over | bet_under
 
-    # Only bet on positive edge bets (threshold can be adjusted)
-    bet_threshold = 0.0  # Can be made configurable
-    bet_mask = edges > bet_threshold
-
-    if not np.any(bet_mask):
+    if not placed.any():
         return {
-            'total_bets': 0,
-            'winning_bets': 0,
-            'win_rate': 0.0,
-            'total_profit': 0.0,
-            'roi': 0.0,
-            'avg_edge': 0.0
+            'total_bets': 0, 'overs': 0, 'unders': 0, 'winning_bets': 0,
+            'win_rate': 0.0, 'total_profit': 0.0, 'roi': 0.0, 'avg_edge': 0.0,
         }
 
-    # For simplicity, assume fixed bet size (in practice, use Kelly)
-    # We'll simulate betting 1 unit on each positive edge bet
-    bet_sizes = np.ones(np.sum(bet_mask))
+    over_win = bet_over & (actual > lines)
+    under_win = bet_under & (actual < lines)
+    lost = (bet_over & (actual < lines)) | (bet_under & (actual > lines))
 
-    # Calculate wins/losses
-    # Win if actual goes OVER the line when we predicted OVER (prediction > line)
-    # Actually, simpler: we win if (actual - line) has same sign as (prediction - line)
-    # Or even simpler for over/under: we bet OVER if prediction > line
-    # We win if actual > line
+    profits = np.zeros(len(predictions))
+    profits[over_win] = american_payout(bets['over_odds'].to_numpy()[over_win])
+    profits[under_win] = american_payout(bets['under_odds'].to_numpy()[under_win])
+    profits[lost] = -1.0
 
-    # For our simulation: we bet OVER when prediction > line
-    # We win if actual > line
-    predicted_over = predictions[bet_mask] > lines[bet_mask]
-    actual_over = actual_yards[bet_mask] > lines[bet_mask]
-    wins = (predicted_over == actual_over)
-
-    # Simplified profit calculation: assume -110 odds (bet 1.1 to win 1.0)
-    # In reality, odds vary by sportsbook
-    bet_amount = 1.1  # Amount risked per bet
-    win_amount = 1.0  # Amount won per winning bet
-
-    profits = np.where(wins, win_amount, -bet_amount)
-    total_profit = np.sum(profits)
-    total_bet = np.sum(bet_sizes * bet_amount)
-
-    # Calculate metrics
-    total_bets = np.sum(bet_mask)
-    winning_bets = np.sum(wins)
-    win_rate = winning_bets / total_bets if total_bets > 0 else 0
-    roi = total_profit / total_bet if total_bet > 0 else 0
-    avg_edge = np.mean(edges[bet_mask]) if total_bets > 0 else 0
+    total_bets = int(placed.sum())
+    winning_bets = int((over_win | under_win).sum())
+    decided = winning_bets + int(lost.sum())  # pushes excluded
+    total_profit = float(profits.sum())
 
     return {
-        'total_bets': int(total_bets),
-        'winning_bets': int(winning_bets),
-        'win_rate': float(win_rate),
-        'total_profit': float(total_profit),
-        'roi': float(roi),
-        'avg_edge': float(avg_edge)
+        'total_bets': total_bets,
+        'overs': int(bet_over.sum()),
+        'unders': int(bet_under.sum()),
+        'winning_bets': winning_bets,
+        'win_rate': winning_bets / decided if decided else 0.0,
+        'total_profit': total_profit,
+        'roi': total_profit / total_bets,
+        'avg_edge': float(np.abs(edges[placed]).mean()),
     }
 
 
+def load_training_end(model_dir='models'):
+    """Last training game date saved by train.py (None for models trained before it saved one)."""
+    try:
+        return pd.Timestamp(joblib.load(f"{model_dir}/training_info.pkl")['train_end'])
+    except FileNotFoundError:
+        return None
+
+
+def load_xgboost_reg(model_dir='models'):
+    """The model saved by scripts/xgboost_reg.py, with its feature list and training cutoff."""
+    path = f"{model_dir}/xgboost_reg.pkl"
+    try:
+        bundle = joblib.load(path)
+    except FileNotFoundError:
+        print(f"Warning: {path} not found (run: python scripts/xgboost_reg.py)")
+        return None
+    print(f"Loaded xgboost_reg model from {path} "
+          f"(trained through {pd.Timestamp(bundle['train_end']).date()})")
+    return bundle
+
+
+def predict_xgboost_reg(bundle, bets):
+    """
+    Predictions from scripts/xgboost_reg.py's model, with features built by
+    that script's own code so they always match how it was trained.
+    Returns (predictions, has_features); games where the QB lacks the prior
+    history that script requires get NaN and has_features=False.
+    """
+    from scripts.xgboost_reg import build_features, has_history, load_qb_games
+
+    qb = build_features(load_qb_games())
+    qb = qb[has_history(qb)]
+
+    features = bundle['features']
+    merged = bets[['game_id', 'qb_id']].merge(
+        qb[['game_id', 'player_id'] + features],
+        left_on=['game_id', 'qb_id'],
+        right_on=['game_id', 'player_id'],
+        how='left',
+    )
+
+    has_features = merged['player_id'].notna().to_numpy()
+    predictions = np.full(len(bets), np.nan)
+    if has_features.any():
+        predictions[has_features] = np.maximum(
+            0, bundle['model'].predict(merged.loc[has_features, features])
+        )
+    return predictions, has_features
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Backtest QB Passing Yards Models")
-    parser.add_argument("--start-year", type=int, default=2015, help="Start year for backtesting")
-    parser.add_argument("--end-year", type=int, default=2022, help="End year for backtesting")
+    parser = argparse.ArgumentParser(description="Backtest QB Passing Yards Models against stored closing lines")
+    parser.add_argument("--start-year", type=int, default=2015,
+                        help="First season of QB history to load (rolling features need prior games)")
+    parser.add_argument("--end-year", type=int, default=datetime.now().year,
+                        help="Last season to load")
     parser.add_argument("--model-dir", type=str, default="models", help="Directory containing trained models")
-    parser.add_argument("--kelly-fraction", type=float, default=0.5, help="Kelly fraction to use (0.5 = half-Kelly)")
-    parser.add_argument("--edge-threshold", type=float, default=0.0, help="Minimum edge to place bet")
+    parser.add_argument("--edge-threshold", type=float, default=0.0,
+                        help="Minimum |prediction - line| in yards to place a bet")
 
     args = parser.parse_args()
 
@@ -304,131 +399,134 @@ def main():
     session = SessionLocal()
 
     try:
-        # Load models
+        # Load models: train.py's four (plus their ensemble) and xgboost_reg.py's
         print(f"Loading models from {args.model_dir}/...")
         models, feature_names = load_models(args.model_dir)
+        xgb_reg = load_xgboost_reg(args.model_dir)
 
-        if not models:
-            print("ERROR: No models loaded. Please train models first using train.py")
+        if not models and xgb_reg is None:
+            print("ERROR: No models loaded. Train first: python -m scripts.train "
+                  "and/or python scripts/xgboost_reg.py")
             return 1
 
-        print(f"Loaded {len(models)} models")
-        if feature_names:
-            print(f"Using {len(feature_names)} features")
-
-        # Load historical data
-        print(f"\nLoading historical data ({args.start_year}-{args.end_year})...")
+        # Load QB history and build features (history is needed even for
+        # games without lines, because features are rolling averages)
+        print(f"\nLoading QB history ({args.start_year}-{args.end_year})...")
         df = get_historical_qb_data(session, args.start_year, args.end_year)
         print(f"Loaded {len(df)} QB game logs")
 
-        if len(df) == 0:
-            print("ERROR: No data loaded for backtesting.")
-            return 1
-
-        # Engineer features
         print("\nEngineering features...")
         df_features = engineer_qb_features(df)
-        print(f"Feature engineering complete. Shape: {df_features.shape}")
 
-        # Prepare features and target
-        print("\nPreparing features...")
-        X = prepare_features_for_backtest(df_features, feature_names)
-        y = df_features['passing_yards'].to_numpy(dtype=float)
-        print(f"Features: {X.shape[1]}")
+        # Keep only QB games that have a stored closing line
+        lines = load_closing_prop_lines(session)
+        bets = (
+            df_features.merge(
+                lines,
+                left_on=['game_id', 'qb_id'],
+                right_on=['game_id', 'player_id'],
+                how='inner',
+            )
+            if not lines.empty else df_features.iloc[0:0]
+        )
 
-        # Time-based split (use all data for backtesting - no train/test split)
-        # In practice, you'd want to walk-forward test, but for simplicity we'll use all data
-        # and make predictions using models trained on previous data
-        # For this demo, we'll just use all data and note this is in-sample testing
+        if bets.empty:
+            print("\nNo QB games have both a stored pregame prop line and a final stat line yet.")
+            print("Lines are captured by: python -m src.ingestion.run_ingestion --props")
+            print("Results appear once CFBD QB stats for those games are ingested.")
+            return 0
 
+        print(f"\n{len(bets)} QB games with a closing line "
+              f"({bets['game_date'].min().date()} to {bets['game_date'].max().date()})")
+
+        # Each model may only score games after its last training game, and
+        # all models are compared on the same games.
         print("\nMaking predictions...")
-
-        # Make predictions with each model
         all_predictions = {}
-        for name, model in models.items():
-            try:
-                print(f"  Predicting with {name}...")
-                preds = model.predict(X)
-                all_predictions[name] = np.maximum(0, preds)  # No negative passing yards
-            except Exception as e:
-                print(f"  Error predicting with {name}: {e}")
-                all_predictions[name] = None
+        eligible = np.ones(len(bets), dtype=bool)
 
-        # Create ensemble prediction
-        valid_predictions = [pred for pred in all_predictions.values() if pred is not None]
-        if valid_predictions:
-            ensemble_pred = np.mean(valid_predictions, axis=0)
-            all_predictions['ensemble'] = np.maximum(0, ensemble_pred)
-        else:
+        if models:
+            X = prepare_features_for_backtest(bets, feature_names)
+            for name, model in models.items():
+                try:
+                    all_predictions[name] = np.maximum(0, model.predict(X))  # No negative passing yards
+                except Exception as e:
+                    print(f"  Error predicting with {name}: {e}")
+            if all_predictions:
+                all_predictions['ensemble'] = np.mean(list(all_predictions.values()), axis=0)
+
+            train_end = load_training_end(args.model_dir)
+            if train_end is None:
+                print("  WARNING: train.py models have no saved training cutoff; retrain them "
+                      "(python -m scripts.train) so games they trained on can be excluded")
+            else:
+                after = (bets['game_date'] > train_end).to_numpy()
+                print(f"  train.py models: trained through {train_end.date()}; "
+                      f"{after.sum()} of {len(bets)} games are after that")
+                eligible &= after
+
+        if xgb_reg is not None:
+            predictions, has_features = predict_xgboost_reg(xgb_reg, bets)
+            all_predictions['xgboost_reg'] = predictions
+            train_end = pd.Timestamp(xgb_reg['train_end'])
+            after = (bets['game_date'] > train_end).to_numpy()
+            print(f"  xgboost_reg: trained through {train_end.date()}; {after.sum()} games are after "
+                  f"that; {has_features.sum()} have enough QB history (>= 10 attempts, 3 prior games)")
+            eligible &= after & has_features
+
+        if not all_predictions:
             print("ERROR: No valid predictions generated")
             return 1
 
-        # For backtesting simulation, we need betting lines
-        # Since we don't have historical odds in our current schema, we'll simulate
-        # In a real implementation, you'd join with the odds table
-        print("\nSimulating betting lines...")
-        # Create simulated lines based on actual yards + some noise
-        # In reality, you'd pull actual lines from the odds API/historical odds
-        np.random.seed(42)  # For reproducible results
-        line_noise = np.random.normal(0, 5, len(y))  # +/- 5 yards typical line movement
-        simulated_lines = y + line_noise
+        bets = bets[eligible].reset_index(drop=True)
+        all_predictions = {name: pred[eligible] for name, pred in all_predictions.items()}
 
-        # Ensure lines are reasonable (typically between 150-400 for QB passing yards)
-        simulated_lines = np.clip(simulated_lines, 150, 400)
+        if bets.empty:
+            print("\nNo games are left that every model can score fairly (they're all inside a "
+                  "model's training period or lack QB history). More weeks of lines will fix this.")
+            return 0
 
-        print(f"Actual yards stats: Mean={y.mean():.1f}, Std={y.std():.1f}")
-        print(f"Simulated lines stats: Mean={simulated_lines.mean():.1f}, Std={simulated_lines.std():.1f}")
+        print(f"\nScoring {len(bets)} games (avg {bets['books'].mean():.1f} books per line)")
+        if len(bets) < 200:
+            print("NOTE: small sample; win rate and ROI are noisy until more weeks accumulate.")
 
-        # Evaluate model accuracy
-        print("\nModel Accuracy Metrics:")
-        print("-" * 40)
+        y = bets['passing_yards'].to_numpy(dtype=float)
+
+        # Accuracy, with the sportsbook line itself as the bar to beat
+        print("\nAccuracy vs actual passing yards:")
+        print("-" * 50)
+        rows = list(all_predictions.items()) + [('sportsbook line', bets['line'].to_numpy(dtype=float))]
+        for name, pred in rows:
+            mae = np.mean(np.abs(y - pred))
+            rmse = np.sqrt(np.mean((y - pred) ** 2))
+            print(f"{name:20} | MAE: {mae:6.2f} | RMSE: {rmse:6.2f}")
+
+        # Betting simulation
+        print("\nBetting simulation (flat 1 unit, real closing prices):")
+        print("-" * 50)
+        print(f"Minimum edge threshold: {args.edge_threshold} yards")
+
         for name, pred in all_predictions.items():
-            if pred is not None:
-                mae = np.mean(np.abs(y - pred))
-                rmse = np.sqrt(np.mean((y - pred) ** 2))
-                # Calculate R²
-                ss_res = np.sum((y - pred) ** 2)
-                ss_tot = np.sum((y - np.mean(y)) ** 2)
-                r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+            results = simulate_betting_strategy(pred, bets, args.edge_threshold)
 
-                print(f"{name:20} | MAE: {mae:6.2f} | RMSE: {rmse:6.2f} | R²: {r2:6.4f}")
+            print(f"\n{name.upper()}:")
+            print(f"  Bets placed: {results['total_bets']} "
+                  f"({results['overs']} over / {results['unders']} under)")
+            print(f"  Winning bets: {results['winning_bets']}")
+            print(f"  Win rate: {results['win_rate']:.1%}  (about 52.4% breaks even at -110)")
+            print(f"  Total profit: {results['total_profit']:+.2f} units")
+            print(f"  ROI: {results['roi']:.1%}")
+            print(f"  Average edge: {results['avg_edge']:.2f} yards")
 
-        # Simulate betting strategy
-        print("\nBetting Strategy Simulation:")
-        print("-" * 40)
-        print(f"Using Kelly fraction: {args.kelly_fraction}")
-        print(f"Minimum edge threshold: {args.edge_threshold}")
-
-        betting_results = {}
-        for name, pred in all_predictions.items():
-            if pred is not None:
-                results = simulate_betting_strategy(
-                    pred,
-                    y,
-                    simulated_lines,
-                    kelly_fraction=args.kelly_fraction
-                )
-                betting_results[name] = results
-
-                print(f"\n{name.upper()}:")
-                print(f"  Bets placed: {results['total_bets']}")
-                print(f"  Winning bets: {results['winning_bets']}")
-                print(f"  Win rate: {results['win_rate']:.1%}")
-                print(f"  Total profit: {results['total_profit']:.2f}")
-                print(f"  ROI: {results['roi']:.1%}")
-                print(f"  Average edge: {results['avg_edge']:.2f} yards")
-
-        # Summary
         print("\n" + "=" * 50)
         print("BACKTESTING COMPLETE")
         print("=" * 50)
         print("Notes:")
-        print("- This backtest uses simulated betting lines")
-        print("- For production backtesting, join with actual historical odds")
-        print("- Model performance may be overfitted (in-sample testing)")
-        print("- Consider walk-forward validation for more realistic estimates")
-        print("- Feature engineering uses simplified rolling averages")
-        print("- In production, ensure proper defensive stats are included")
+        print("- Lines are each book's last snapshot before kickoff, so how close")
+        print("  they are to the true closing line depends on snapshot timing")
+        print("- Only games after every model's training cutoff are scored")
+        print("- xgboost_reg skips QBs with < 10 attempts in the game, so all models")
+        print("  are scored only on games where the QB actually threw 10+ passes")
 
     except Exception as e:
         print(f"ERROR: {e}")
