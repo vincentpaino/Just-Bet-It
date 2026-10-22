@@ -60,25 +60,38 @@ def engineer_qb_features(df):
     # Make a copy to avoid warnings
     df = df.copy()
 
+    # The DB returns dates as datetime.date and NUMERIC columns as Decimal
+    # (or all-None objects when the features table is empty); convert them
+    # so .dt and numeric operations work.
+    df['game_date'] = pd.to_datetime(df['game_date'])
+    decimal_columns = [
+        'completion_pct', 'yards_per_attempt',
+        'rolling_win_pct_home', 'rolling_win_pct_away', 'elo_home', 'elo_away',
+        'rest_days_home', 'rest_days_away', 'home_away_split', 'sos_home', 'sos_away',
+    ]
+    for col in decimal_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     # Sort by QB and date for rolling calculations
     df = df.sort_values(['qb_id', 'game_date']).reset_index(drop=True)
 
-    # QB-specific rolling features (last 3 games)
-    df['qb_passing_yards_3game_avg'] = df.groupby('qb_id')['passing_yards'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_completion_pct_3game_avg'] = df.groupby('qb_id')['completion_pct'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_yards_per_attempt_3game_avg'] = df.groupby('qb_id')['yards_per_attempt'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_td_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_tds'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
-    df['qb_int_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_ints'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
+    # QB-specific rolling features (previous 3 games). shift(1) drops the
+    # current game, so a row's features never include its own stats (that
+    # would leak the target). A QB's first game has no history and stays NaN.
+    def prior_3game_avg(col):
+        return df.groupby('qb_id')[col].transform(
+            lambda x: x.shift(1).rolling(3, min_periods=1).mean()
+        )
+
+    df['td_rate'] = df['passing_tds'] / df['attempts'].replace(0, np.nan)
+    df['int_rate'] = df['passing_ints'] / df['attempts'].replace(0, np.nan)
+
+    df['qb_passing_yards_3game_avg'] = prior_3game_avg('passing_yards')
+    df['qb_completion_pct_3game_avg'] = prior_3game_avg('completion_pct')
+    df['qb_yards_per_attempt_3game_avg'] = prior_3game_avg('yards_per_attempt')
+    df['qb_td_rate_3game_avg'] = prior_3game_avg('td_rate')
+    df['qb_int_rate_3game_avg'] = prior_3game_avg('int_rate')
 
     # Opposing defensive features (would need defensive stats table)
     # For now, we'll use placeholder - in production, join with defensive stats
@@ -101,8 +114,10 @@ def engineer_qb_features(df):
     df['is_late_season'] = (df['week'] > 12).astype(int)
 
     # Fill NaN values
-    numeric_columns = df.select_dtypes(include=[np.number]).columns
-    df[numeric_columns] = df[numeric_columns].fillna(method='ffill').fillna(0)
+    # Forward-fill within each QB only, so one QB's values never carry into
+    # the next QB's rows; anything still missing (e.g. a first game) becomes 0.
+    numeric_columns = df.select_dtypes(include=[np.number]).columns.drop('qb_id')
+    df[numeric_columns] = df.groupby('qb_id')[numeric_columns].ffill().fillna(0)
 
     return df
 
@@ -184,8 +199,12 @@ def get_historical_qb_data(session, start_year=2015, end_year=2022):
             'qb_team_name': r.qb_team_name,
             'qb_conference': r.qb_conference,
             'qb_division': r.qb_division,
+
+            # Derived features
+            'is_home': 1 if r.QBGameStat.home_away == 'home' else 0,
         }
         for r in results
+        if r.QBGameStat.passing_yards is not None
     ])
 
     return df
@@ -313,7 +332,8 @@ def main():
 
         # Prepare features and target
         print("\nPreparing features...")
-        X, y, _ = prepare_features_for_backtest(df_features, feature_names)
+        X = prepare_features_for_backtest(df_features, feature_names)
+        y = df_features['passing_yards'].to_numpy(dtype=float)
         print(f"Features: {X.shape[1]}")
 
         # Time-based split (use all data for backtesting - no train/test split)

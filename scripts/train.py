@@ -69,59 +69,6 @@ def load_training_data(session, start_year=2015, end_year=2023):
     df = pd.DataFrame([
         {
             # Target variable
-            'passing_yards': r.QBGameStat.passcing_yards if hasattr(r.QBGameStat, 'passing_yards') else None,
-
-            # QB basic info
-            'qb_id': r.QBGameStat.player_id,
-            'qb_name': r.QBGameStat.player_name,
-            'team_id': r.QBGameStat.team_id,
-            'opponent_team_id': r.QBGameStat.opponent_team_id,
-            'game_date': r.game_date,
-            'season': r.QBGameStat.season,
-            'week': r.QBGameStat.week,
-            'home_away': r.QBGameStat.home_away,
-
-            # QB stats from this game
-            'passing_tds': r.QBGameStat.passing_tds,
-            'passing_ints': r.QBGameStat.passing_ints,
-            'completions': r.QBGameStat.completions,
-            'attempts': r.QBGameStat.attempts,
-            'completion_pct': r.QBGameStat.completion_pct,
-            'yards_per_attempt': r.QBGameStat.yards_per_attempt,
-            'rushing_yards': r.QBGameStat.rushing_yards,
-            'rushing_tds': r.QBGameStat.rushing_tds,
-            'rushing_attempts': r.QBGameStat.rushing_attempts,
-
-            # Team info
-            'qb_team_name': r.qb_team_name,
-            'qb_conference': r.qb_conference,
-            'qb_division': r.qb_division,
-
-            # Game features (from features table)
-            'rolling_win_pct_home': r.rolling_win_pct_home,
-            'rolling_win_pct_away': r.rolling_win_pct_away,
-            'elo_home': r.elo_home,
-            'elo_away': r.elo_away,
-            'rest_days_home': r.rest_days_home,
-            'rest_days_away': r.rest_days_away,
-            'home_away_split': r.home_away_split,
-            'sos_home': r.sos_home,
-            'sos_away': r.sos_away,
-
-            # Derived features
-            'is_home': 1 if r.QBGameStat.home_away == 'home' else 0,
-            'points_total': None,  # Will fill from odds if needed
-            'spread': None,        # Will fill from odds if needed
-            'over_under': None,    # Will fill from odds if needed
-        }
-        for r in results
-        if r.QBGameStat.passcing_yards is not None  # Fixed typo below
-    ])
-
-    # Fix the typo in the above comprehension
-    df = pd.DataFrame([
-        {
-            # Target variable
             'passing_yards': r.QBGameStat.passing_yards,
 
             # QB basic info
@@ -182,25 +129,38 @@ def engineer_qb_features(df):
     # Make a copy to avoid warnings
     df = df.copy()
 
+    # The DB returns dates as datetime.date and NUMERIC columns as Decimal
+    # (or all-None objects when the features table is empty); convert them
+    # so .dt and numeric operations work.
+    df['game_date'] = pd.to_datetime(df['game_date'])
+    decimal_columns = [
+        'completion_pct', 'yards_per_attempt',
+        'rolling_win_pct_home', 'rolling_win_pct_away', 'elo_home', 'elo_away',
+        'rest_days_home', 'rest_days_away', 'home_away_split', 'sos_home', 'sos_away',
+    ]
+    for col in decimal_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     # Sort by QB and date for rolling calculations
     df = df.sort_values(['qb_id', 'game_date']).reset_index(drop=True)
 
-    # QB-specific rolling features (last 3 games)
-    df['qb_passing_yards_3game_avg'] = df.groupby('qb_id')['passing_yards'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_completion_pct_3game_avg'] = df.groupby('qb_id')['completion_pct'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_yards_per_attempt_3game_avg'] = df.groupby('qb_id')['yards_per_attempt'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_td_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_tds'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
-    df['qb_int_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_ints'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
+    # QB-specific rolling features (previous 3 games). shift(1) drops the
+    # current game, so a row's features never include its own stats (that
+    # would leak the target). A QB's first game has no history and stays NaN.
+    def prior_3game_avg(col):
+        return df.groupby('qb_id')[col].transform(
+            lambda x: x.shift(1).rolling(3, min_periods=1).mean()
+        )
+
+    df['td_rate'] = df['passing_tds'] / df['attempts'].replace(0, np.nan)
+    df['int_rate'] = df['passing_ints'] / df['attempts'].replace(0, np.nan)
+
+    df['qb_passing_yards_3game_avg'] = prior_3game_avg('passing_yards')
+    df['qb_completion_pct_3game_avg'] = prior_3game_avg('completion_pct')
+    df['qb_yards_per_attempt_3game_avg'] = prior_3game_avg('yards_per_attempt')
+    df['qb_td_rate_3game_avg'] = prior_3game_avg('td_rate')
+    df['qb_int_rate_3game_avg'] = prior_3game_avg('int_rate')
 
     # Opposing defensive features (would need defensive stats table)
     # For now, we'll use placeholder - in production, join with defensive stats
@@ -226,8 +186,10 @@ def engineer_qb_features(df):
     # For now, we'll keep as categorical and let models handle it
 
     # Fill NaN values
-    numeric_columns = df.select_dtypes(include=[np.number]).columns
-    df[numeric_columns] = df[numeric_columns].fillna(method='ffill').fillna(0)
+    # Forward-fill within each QB only, so one QB's values never carry into
+    # the next QB's rows; anything still missing (e.g. a first game) becomes 0.
+    numeric_columns = df.select_dtypes(include=[np.number]).columns.drop('qb_id')
+    df[numeric_columns] = df.groupby('qb_id')[numeric_columns].ffill().fillna(0)
 
     return df
 
@@ -478,6 +440,10 @@ def main():
         print("\nEngineering features...")
         df_features = engineer_qb_features(df)
         print(f"Feature engineering complete. Shape: {df_features.shape}")
+
+        # Feature engineering sorts by QB; re-sort by date so the split below
+        # trains on the past and tests on the future.
+        df_features = df_features.sort_values('game_date', kind='stable').reset_index(drop=True)
 
         # Prepare features and target
         print("\nPreparing features for training...")

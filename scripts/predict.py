@@ -53,60 +53,6 @@ def load_models(model_dir='models'):
         return {}, []
 
 
-def engineer_qb_features_for_prediction(df):
-    """
-    Engineer features for QB passing yards prediction (same as in training).
-    """
-    # Make a copy to avoid warnings
-    df = df.copy()
-
-    # Sort by QB and date for rolling calculations
-    df = df.sort_values(['qb_id', 'game_date']).reset_index(drop=True)
-
-    # QB-specific rolling features (last 3 games)
-    df['qb_passing_yards_3game_avg'] = df.groupby('qb_id')['passing_yards'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_completion_pct_3game_avg'] = df.groupby('qb_id')['completion_pct'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_yards_per_attempt_3game_avg'] = df.groupby('qb_id')['yards_per_attempt'].transform(
-        lambda x: x.rolling(3, min_periods=1).mean()
-    )
-    df['qb_td_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_tds'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
-    df['qb_int_rate_3game_avg'] = df.groupby('qb_id').apply(
-        lambda x: (x['passing_ints'] / x['attempts'].replace(0, np.nan)).rolling(3, min_periods=1).mean()
-    ).reset_index(level=0, drop=True)
-
-    # Opposing defensive features (would need defensive stats table)
-    # For now, we'll use placeholder - in production, join with defensive stats
-    df['opp_pass_yards_allowed_avg'] = 240.0  # League average placeholder
-    df['opp_sack_rate_avg'] = 6.5             # League average placeholder
-    df['opp_pass_yards_per_attempt_allowed'] = 6.8  # League average placeholder
-
-    # Matchup features
-    df['pass_yards_vs_opp_allowed'] = df['qb_passing_yards_3game_avg'] - df['opp_pass_yards_allowed_avg']
-    df['yards_per_attempt_vs_opp_allowed'] = df['qb_yards_per_attempt_3game_avg'] - df['opp_pass_yards_per_attempt_allowed']
-
-    # Game context features
-    df['days_since_last_game'] = df.groupby('qb_id')['game_date'].diff().dt.days.fillna(7)
-    df['is_home_game'] = df['is_home']
-
-    # Season progress feature (early/mid/late season)
-    df['week_normalized'] = df['week'] / 17.0  # Normalize week 1-17 to 0-1
-    df['is_early_season'] = (df['week'] <= 5).astype(int)
-    df['is_mid_season'] = ((df['week'] > 5) & (df['week'] <= 12)).astype(int)
-    df['is_late_season'] = (df['week'] > 12).astype(int)
-
-    # Fill NaN values
-    numeric_columns = df.select_dtypes(include=[np.number]).columns
-    df[numeric_columns] = df[numeric_columns].fillna(method='ffill').fillna(0)
-
-    return df
-
-
 def prepare_features_for_prediction(df, feature_names):
     """
     Prepare feature matrix for prediction using the same features as training.
@@ -154,18 +100,27 @@ def predict_qb_passing_yards(session, models, feature_names, qb_id, opponent_tea
         print(f"No recent stats found for QB ID {qb_id}")
         return None
 
-    # Use the most recent game as base, then adjust for upcoming game
-    latest_game = recent_stats[0]
+    # Match training: it only uses games with passing attempts, and each
+    # "3game" feature averages the 3 games before this one, skipping missing
+    # values (0 if there are none).
+    last3 = [g for g in recent_stats if g.attempts][:3]
 
-    # Create a feature dictionary for the upcoming game
-    # In a real implementation, you'd want to properly calculate rolling averages
-    # based on the actual recent games
+    if not last3:
+        print(f"No recent games with passing attempts for QB ID {qb_id}")
+        return None
+
+    latest_game = last3[0]
+
+    def avg(values):
+        values = [float(v) for v in values if v is not None]
+        return np.mean(values) if values else 0
+
     features = {
-        'qb_passing_yards_3game_avg': np.mean([g.passing_yards for g in recent_stats if g.passing_yards is not None]) if any(g.passing_yards for g in recent_stats) else 0,
-        'qb_completion_pct_3game_avg': np.mean([g.completion_pct for g in recent_stats if g.completion_pct is not None]) if any(g.completion_pct for g in recent_stats) else 0,
-        'qb_yards_per_attempt_3game_avg': np.mean([g.yards_per_attempt for g in recent_stats if g.yards_per_attempt is not None]) if any(g.yards_per_attempt for g in recent_stats) else 0,
-        'qb_td_rate_3game_avg': np.mean([(g.passing_tds or 0) / max(g.attempts or 1, 1) for g in recent_stats]) if recent_stats else 0,
-        'qb_int_rate_3game_avg': np.mean([(g.passing_ints or 0) / max(g.attempts or 1, 1) for g in recent_stats]) if recent_stats else 0,
+        'qb_passing_yards_3game_avg': avg(g.passing_yards for g in last3),
+        'qb_completion_pct_3game_avg': avg(g.completion_pct for g in last3),
+        'qb_yards_per_attempt_3game_avg': avg(g.yards_per_attempt for g in last3),
+        'qb_td_rate_3game_avg': avg(g.passing_tds / g.attempts if g.passing_tds is not None else None for g in last3),
+        'qb_int_rate_3game_avg': avg(g.passing_ints / g.attempts if g.passing_ints is not None else None for g in last3),
 
         'is_home_game': 1 if is_home else 0,
         'days_since_last_game': (game_date - latest_game.game_date).days if latest_game.game_date else 7,
@@ -192,14 +147,12 @@ def predict_qb_passing_yards(session, models, feature_names, qb_id, opponent_tea
         'opp_pass_yards_per_attempt_allowed': 6.8, # League average
     }
 
-    # Convert to DataFrame for feature engineering
-    df = pd.DataFrame([features])
-
-    # Apply feature engineering (though for single prediction, this is limited)
-    df_features = engineer_qb_features_for_prediction(df)
+    # The dict above already holds final feature values, so it goes straight to
+    # the model. (NUMERIC columns come back as Decimal; cast to float.)
+    df = pd.DataFrame([features]).astype(float)
 
     # Prepare features
-    X = prepare_features_for_prediction(df_features, feature_names)
+    X = prepare_features_for_prediction(df, feature_names)
 
     # Make predictions with each model
     predictions = {}
@@ -259,7 +212,7 @@ def main():
             print(f"\nRecent games for QB ID {args.qb_id}:")
             print("-" * 80)
             for i, stat in enumerate(recent_stats):
-                print(f"{i+1:2}. {stat.game_date} | {stat.passcing_yards:3.0f} yds | "
+                print(f"{i+1:2}. {stat.game_date} | {stat.passing_yards:3.0f} yds | "
                       f"{stat.completions:2.0f}/{stat.attempts:2.0f} | "
                       f"{stat.passing_tds:1.0f} TD | {stat.passing_ints:1.0f} INT")
             return 0
