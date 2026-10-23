@@ -37,3 +37,6 @@ Thumbs.db
 
 # --- Optuna parameter tuning output ---
 scripts/best_params.json
+
+# --- ignore exploratory data analysis outputs ---
+/eda_output
