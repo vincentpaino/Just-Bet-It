@@ -150,8 +150,20 @@ print(engine.connect().execute(text('SELECT COUNT(*) FROM qb_game_stats')).scala
 ```
 
 You should get a count in the thousands. If you're on the shared database,
-you're done with setup; `python scripts/xgboost_reg.py`, `scripts/train.py`
-and `scripts/backtest.py` all work from here.
+you're done with setup. The model scripts, in order:
+
+```bash
+python -m scripts.train              # train all 4 models + ensemble -> models/qb_models.pkl (~10s)
+python -m scripts.predict_upcoming   # predictions vs. sportsbook lines for upcoming games
+python -m scripts.predict --qb-id 5078810 --game-date 2026-10-24   # one QB, one game
+python -m scripts.backtest           # score the models against stored real lines
+python scripts/xgboost_reg.py        # XGBoost analysis: baselines, feature importance
+python scripts/xgboost_reg_tune.py   # re-tune XGBoost (Optuna, ~3 min) -> configs/
+```
+
+Trained models aren't in git, so run `scripts.train` first after cloning.
+Every model uses the same real, pregame-only features from
+`scripts/xgboost_reg.py`; nothing in them is made up or a placeholder.
 
 ## 10. Test ingestion (local database only)
 

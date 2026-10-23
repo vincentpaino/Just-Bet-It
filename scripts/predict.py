@@ -1,274 +1,119 @@
 """
-QB Passing Yards Prediction Script.
-Loads trained models and makes predictions for upcoming games.
+Predict one QB's passing yards for a scheduled game, with every trained model.
+
+The game is looked up in the schedule (games table), so the opponent,
+home/away and week are real, and features come from the same code the
+models were trained with (scripts/xgboost_reg.py). Works for upcoming games
+and for past ones (then the actual result is shown too).
+
+Run from the project root (after python -m scripts.train):
+    python -m scripts.predict --qb-id 5078810 --game-date 2026-10-24
+    python -m scripts.predict --qb-id 5078810 --list-recent
 """
 import argparse
 import sys
 from datetime import datetime
 
-import joblib
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
-from src.db.models import QBGameStat, Game, Team
-from src.db.session import SessionLocal, init_db
-from sqlalchemy import and_, or_
-
-
-def load_models(model_dir='models'):
-    """
-    Load trained models and feature names from disk.
-    """
-    try:
-        models = {}
-        model_files = {
-            'linear_regression': 'linear_regression_model.pkl',
-            'random_forest': 'random_forest_model.pkl',
-            'xgboost': 'xgboost_model.pkl',
-            'neural_network': 'neural_network_model.pkl'
-        }
-
-        for name, filename in model_files.items():
-            model_path = f"{model_dir}/{filename}"
-            try:
-                models[name] = joblib.load(model_path)
-                print(f"Loaded {name} model from {model_path}")
-            except FileNotFoundError:
-                print(f"Warning: {model_path} not found")
-                continue
-
-        # Load feature names
-        feature_path = f"{model_dir}/feature_names.pkl"
-        try:
-            feature_names = joblib.load(feature_path)
-            print(f"Loaded feature names from {feature_path}")
-        except FileNotFoundError:
-            print(f"Warning: {feature_path} not found")
-            feature_names = []
-
-        return models, feature_names
-
-    except Exception as e:
-        print(f"Error loading models: {e}")
-        return {}, []
+from scripts.train import MODELS_PATH, load_models, predict_all
+from scripts.xgboost_reg import PROJECT_ROOT, build_upcoming_features, load_qb_games
+from src.db.session import engine
 
 
-def prepare_features_for_prediction(df, feature_names):
-    """
-    Prepare feature matrix for prediction using the same features as training.
-    """
-    # Filter to only columns that exist in both df and feature_names
-    available_features = [col for col in feature_names if col in df.columns]
-    missing_features = [col for col in feature_names if col not in df.columns]
-
-    if missing_features:
-        print(f"Warning: Missing features: {missing_features}")
-        # Add missing features with default values
-        for feat in missing_features:
-            df[feat] = 0.0
-
-    # Prepare X
-    X = df[feature_names].copy()
-    X = X.fillna(0)  # Fill any remaining NaN
-
-    return X
+def recent_games(qb_id, limit=10) -> pd.DataFrame:
+    return pd.read_sql(text("""
+        SELECT s.game_date, t.team_name AS team, o.team_name AS opponent, s.home_away,
+               s.passing_yards, s.completions, s.attempts, s.passing_tds, s.passing_ints
+        FROM qb_game_stats s
+        JOIN teams t ON t.team_id = s.team_id
+        LEFT JOIN teams o ON o.team_id = s.opponent_team_id
+        WHERE s.player_id = :qb ORDER BY s.game_date DESC LIMIT :n
+    """), engine, params={"qb": qb_id, "n": limit})
 
 
-def get_recent_qb_stats(session, qb_id, games_back=5):
-    """
-    Get recent game stats for a QB to use for feature engineering.
-    """
-    recent_games = (
-        session.query(QBGameStat)
-        .filter(QBGameStat.player_id == qb_id)
-        .order_by(QBGameStat.game_date.desc())
-        .limit(games_back)
-        .all()
-    )
-
-    return recent_games
-
-
-def predict_qb_passing_yards(session, models, feature_names, qb_id, opponent_team_id, game_date, is_home=True):
-    """
-    Predict passing yards for a specific QB in an upcoming game.
-    """
-    # Get the QB's recent stats to build features
-    recent_stats = get_recent_qb_stats(session, qb_id, games_back=5)
-
-    if not recent_stats:
-        print(f"No recent stats found for QB ID {qb_id}")
-        return None
-
-    # Match training: it only uses games with passing attempts, and each
-    # "3game" feature averages the 3 games before this one, skipping missing
-    # values (0 if there are none).
-    last3 = [g for g in recent_stats if g.attempts][:3]
-
-    if not last3:
-        print(f"No recent games with passing attempts for QB ID {qb_id}")
-        return None
-
-    latest_game = last3[0]
-
-    def avg(values):
-        values = [float(v) for v in values if v is not None]
-        return np.mean(values) if values else 0
-
-    features = {
-        'qb_passing_yards_3game_avg': avg(g.passing_yards for g in last3),
-        'qb_completion_pct_3game_avg': avg(g.completion_pct for g in last3),
-        'qb_yards_per_attempt_3game_avg': avg(g.yards_per_attempt for g in last3),
-        'qb_td_rate_3game_avg': avg(g.passing_tds / g.attempts if g.passing_tds is not None else None for g in last3),
-        'qb_int_rate_3game_avg': avg(g.passing_ints / g.attempts if g.passing_ints is not None else None for g in last3),
-
-        'is_home_game': 1 if is_home else 0,
-        'days_since_last_game': (game_date - latest_game.game_date).days if latest_game.game_date else 7,
-        'week_normalized': 0.5,  # Placeholder - would need actual week
-        'is_early_season': 0,
-        'is_mid_season': 1,
-        'is_late_season': 0,
-
-        'rolling_win_pct_home': 0.5,  # Placeholder
-        'rolling_win_pct_away': 0.5,  # Placeholder
-        'elo_home': 1500,             # Placeholder
-        'elo_away': 1500,             # Placeholder
-        'rest_days_home': 7,          # Placeholder
-        'rest_days_away': 7,          # Placeholder
-        'home_away_split': 0.0,       # Placeholder
-        'sos_home': 0.5,              # Placeholder
-        'sos_away': 0.5,              # Placeholder
-
-        'pass_yards_vs_opp_allowed': 0.0,   # Placeholder
-        'yards_per_attempt_vs_opp_allowed': 0.0, # Placeholder
-
-        'opp_pass_yards_allowed_avg': 240.0,  # League average
-        'opp_sack_rate_avg': 6.5,             # League average
-        'opp_pass_yards_per_attempt_allowed': 6.8, # League average
-    }
-
-    # The dict above already holds final feature values, so it goes straight to
-    # the model. (NUMERIC columns come back as Decimal; cast to float.)
-    df = pd.DataFrame([features]).astype(float)
-
-    # Prepare features
-    X = prepare_features_for_prediction(df, feature_names)
-
-    # Make predictions with each model
-    predictions = {}
-    for name, model in models.items():
-        try:
-            pred = model.predict(X)[0]
-            predictions[name] = max(0, pred)  # Passing yards can't be negative
-        except Exception as e:
-            print(f"Error predicting with {name}: {e}")
-            predictions[name] = None
-
-    # Create ensemble prediction (average of available predictions)
-    valid_preds = [p for p in predictions.values() if p is not None]
-    if valid_preds:
-        ensemble_pred = np.mean(valid_preds)
-        predictions['ensemble'] = max(0, ensemble_pred)
-    else:
-        predictions['ensemble'] = None
-
-    return predictions
+def find_game(qb_id, game_date, opponent_team_id=None):
+    """The QB's team (most recent before the game) and its scheduled game that day."""
+    with engine.connect() as c:
+        qb = c.execute(text("""
+            SELECT player_name, team_id FROM qb_game_stats
+            WHERE player_id = :qb AND game_date < :d ORDER BY game_date DESC LIMIT 1
+        """), {"qb": qb_id, "d": game_date}).first()
+        if qb is None:
+            return None, None
+        game = c.execute(text("""
+            SELECT g.game_id, g.game_date, g.season, g.week, g.home_team_id, g.away_team_id,
+                   ht.team_name AS home, at.team_name AS away
+            FROM games g
+            JOIN teams ht ON ht.team_id = g.home_team_id
+            JOIN teams at ON at.team_id = g.away_team_id
+            WHERE g.game_date = :d AND :team IN (g.home_team_id, g.away_team_id)
+              AND (CAST(:opp AS INTEGER) IS NULL OR :opp IN (g.home_team_id, g.away_team_id))
+        """), {"d": game_date, "team": qb.team_id, "opp": opponent_team_id}).first()
+    return qb, game
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Predict QB Passing Yards")
-    parser.add_argument("--qb-id", type=int, required=True, help="CFBD Player ID of the QB")
-    parser.add_argument("--opponent-team-id", type=int, required=True, help="Team ID of the opponent")
-    parser.add_argument("--game-date", type=str, required=True, help="Game date (YYYY-MM-DD)")
-    parser.add_argument("--is-home", action="store_true", help="Is the QB playing at home?")
-    parser.add_argument("--model-dir", type=str, default="models", help="Directory containing trained models")
-    parser.add_argument("--list-recent", action="store_true", help="List recent games for the QB")
-
+    parser = argparse.ArgumentParser(description="Predict a QB's passing yards for a scheduled game")
+    parser.add_argument("--qb-id", type=int, required=True, help="CFBD player ID of the QB")
+    parser.add_argument("--game-date", type=str, help="Game date (YYYY-MM-DD)")
+    parser.add_argument("--opponent-team-id", type=int,
+                        help="Only needed if the QB's team plays twice that day (it never should)")
+    parser.add_argument("--list-recent", action="store_true", help="List the QB's recent games instead")
     args = parser.parse_args()
 
-    print("QB Passing Yards Prediction")
-    print("-" * 30)
+    if args.list_recent:
+        print(recent_games(args.qb_id).to_string(index=False))
+        return 0
 
-    # Initialize database
-    init_db()
-    session = SessionLocal()
-
+    if not args.game_date:
+        parser.error("--game-date is required (or use --list-recent)")
     try:
-        # Load models
-        print(f"Loading models from {args.model_dir}/...")
-        models, feature_names = load_models(args.model_dir)
+        game_date = datetime.strptime(args.game_date, "%Y-%m-%d").date()
+    except ValueError:
+        parser.error("--game-date must be YYYY-MM-DD")
 
-        if not models:
-            print("ERROR: No models loaded. Please train models first using train.py")
-            return 1
-
-        print(f"Loaded {len(models)} models")
-        if feature_names:
-            print(f"Using {len(feature_names)} features")
-
-        if args.list_recent:
-            # List recent games for the QB
-            recent_stats = get_recent_qb_stats(session, args.qb_id, games_back=10)
-            print(f"\nRecent games for QB ID {args.qb_id}:")
-            print("-" * 80)
-            for i, stat in enumerate(recent_stats):
-                print(f"{i+1:2}. {stat.game_date} | {stat.passing_yards:3.0f} yds | "
-                      f"{stat.completions:2.0f}/{stat.attempts:2.0f} | "
-                      f"{stat.passing_tds:1.0f} TD | {stat.passing_ints:1.0f} INT")
-            return 0
-
-        # Parse game date
-        try:
-            game_date = datetime.strptime(args.game_date, "%Y-%m-%d").date()
-        except ValueError:
-            print("ERROR: Game date must be in YYYY-MM-DD format")
-            return 1
-
-        # Make prediction
-        print(f"\nMaking prediction for QB ID {args.qb_id}")
-        print(f" vs Opponent Team ID {args.opponent_team_id}")
-        print(f" on {game_date} ({'Home' if args.is_home else 'Away'})")
-        print("-" * 50)
-
-        predictions = predict_qb_passing_yards(
-            session,
-            models,
-            feature_names,
-            args.qb_id,
-            args.opponent_team_id,
-            game_date,
-            args.is_home
-        )
-
-        if predictions is None:
-            print("ERROR: Unable to make prediction")
-            return 1
-
-        # Display predictions
-        print("PREDICTIONS:")
-        for model_name, pred in predictions.items():
-            if pred is not None:
-                print(f"  {model_name:20}: {pred:6.1f} passing yards")
-            else:
-                print(f"  {model_name:20}: Failed")
-
-        # Additional context
-        print("\n" + "-" * 50)
-        print("NOTE: This is a simplified prediction. For production use:")
-        print("- Ensure rolling averages are properly calculated")
-        print("- Include actual defensive opponent stats")
-        print("- Use correct week/season context")
-        print("- Consider weather, injuries, game script, etc.")
-
-    except Exception as e:
-        print(f"ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+    bundle = load_models()
+    if bundle is None:
+        print(f"ERROR: {MODELS_PATH.relative_to(PROJECT_ROOT)} not found. Train first: python -m scripts.train")
         return 1
 
-    finally:
-        session.close()
+    qb, game = find_game(args.qb_id, game_date, args.opponent_team_id)
+    if qb is None:
+        print(f"ERROR: no games on record for QB {args.qb_id} before {game_date}")
+        return 1
+    if game is None:
+        print(f"ERROR: no scheduled game for {qb.player_name}'s team on {game_date}")
+        return 1
 
+    is_home = qb.team_id == game.home_team_id
+    upcoming = pd.DataFrame([{
+        "game_id": game.game_id, "player_id": args.qb_id, "player_name": qb.player_name,
+        "team_id": qb.team_id,
+        "opponent_team_id": game.away_team_id if is_home else game.home_team_id,
+        "game_date": game.game_date, "season": game.season, "week": game.week,
+        "home_away": "home" if is_home else "away",
+    }])
+
+    features = build_upcoming_features(load_qb_games(), upcoming)
+    if features.empty:
+        print(f"ERROR: {qb.player_name} doesn't have enough history yet (needs 3+ prior games "
+              f"with 10+ attempts)")
+        return 1
+
+    preds = predict_all(bundle["models"], features[bundle["features"]])
+    row = features.iloc[0]
+
+    print(f"{qb.player_name}: {game.away} @ {game.home}, {game.game_date} "
+          f"({'home' if is_home else 'away'}, week {game.week})")
+    print(f"Last 5 games avg: {row['avg_pass_yds_last5']:.0f} yds | "
+          f"opponent allows {row['opp_pass_yds_allowed_avg']:.0f} pass yds/game\n")
+    for name, pred in preds.items():
+        print(f"  {name:18} {pred[0]:6.1f} passing yards")
+    if pd.notna(row["passing_yards"]):
+        print(f"\n  actual             {row['passing_yards']:6.0f} passing yards")
     return 0
 
 

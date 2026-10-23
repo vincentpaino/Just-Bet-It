@@ -3,8 +3,8 @@ Model predictions vs. sportsbook prop lines for upcoming games.
 
 For every QB with a stored passing-yards line (qb_prop_lines) in a game that
 hasn't kicked off, this prints:
-  - the consensus line and the xgboost_reg prediction (plus the train.py
-    ensemble and the QB's last-5-game average for comparison),
+  - the consensus line, the XGBoost prediction (the primary model), the
+    ensemble (average of all four models) and the QB's last-5-game average,
   - which side the model leans and the best available price for that side
     across books (line shopping, Doc II Section 6.3),
   - a rough model win probability and expected value per 1-unit bet.
@@ -13,25 +13,22 @@ These are NOT validated betting recommendations: the model hasn't yet been
 shown to beat real lines (see scripts/backtest.py), and the win probability
 assumes the model's errors are normal with its test RMSE as the spread.
 
-Run from the project root (after training: python scripts/xgboost_reg.py):
+Run from the project root (after training: python -m scripts.train):
     python -m scripts.predict_upcoming
     python -m scripts.predict_upcoming --hours 48 --min-edge 15
 """
 
 import argparse
-import contextlib
-import io
 import sys
 from math import erf, sqrt
 
-import joblib
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-from scripts import predict as legacy
-from scripts.xgboost_reg import MODEL_PATH, PROJECT_ROOT, build_upcoming_features, load_qb_games
-from src.db.session import SessionLocal, engine
+from scripts.train import MODELS_PATH, load_models, predict_all
+from scripts.xgboost_reg import PROJECT_ROOT, build_upcoming_features, load_qb_games
+from src.db.session import engine
 
 # Rough spread of the model's errors (its test RMSE, in yards), used to turn
 # "prediction vs line" into a win probability.
@@ -110,10 +107,9 @@ def main():
                         help="Only show QBs where |model - line| is at least this many yards")
     args = parser.parse_args()
 
-    try:
-        bundle = joblib.load(MODEL_PATH)
-    except FileNotFoundError:
-        print(f"ERROR: {MODEL_PATH.relative_to(PROJECT_ROOT)} not found. Train first: python scripts/xgboost_reg.py")
+    bundle = load_models()
+    if bundle is None:
+        print(f"ERROR: {MODELS_PATH.relative_to(PROJECT_ROOT)} not found. Train first: python -m scripts.train")
         return 1
 
     lines = load_upcoming_lines(args.hours)
@@ -124,45 +120,33 @@ def main():
 
     qbs = upcoming_qbs(lines)
 
-    # xgboost_reg prediction, using the same feature code it was trained with
+    # Predictions from every model, using the same feature code they were trained with
     features = build_upcoming_features(
         load_qb_games(),
         qbs[["game_id", "player_id", "player_name", "team_id", "opponent_team_id",
              "game_date", "season", "week", "home_away"]],
     )
-    features["xgboost_reg"] = bundle["model"].predict(features[bundle["features"]])
-    qbs = qbs.merge(features[["game_id", "player_id", "xgboost_reg", "avg_pass_yds_last5"]],
+    preds = predict_all(bundle["models"], features[bundle["features"]])
+    features["xgboost"] = preds["xgboost"]
+    features["ensemble"] = preds["ensemble"]
+    qbs = qbs.merge(features[["game_id", "player_id", "xgboost", "ensemble", "avg_pass_yds_last5"]],
                     on=["game_id", "player_id"], how="left")
-
-    # train.py ensemble for comparison (predict.py prints a lot; keep it quiet)
-    session = SessionLocal()
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            models, feature_names = legacy.load_models(str(PROJECT_ROOT / "models"))
-            qbs["ensemble"] = [
-                (legacy.predict_qb_passing_yards(session, models, feature_names, q.player_id,
-                                                 q.opponent_team_id, q.game_date, q.is_home) or {}
-                 ).get("ensemble") if models else None
-                for q in qbs.itertuples()
-            ]
-    finally:
-        session.close()
 
     rows = []
     for q in qbs.itertuples():
         books = lines[(lines["game_id"] == q.game_id) & (lines["player_id"] == q.player_id)]
         line = books["line"].median()
-        bet = best_bet(books, q.xgboost_reg) if pd.notna(q.xgboost_reg) else None
+        bet = best_bet(books, q.xgboost) if pd.notna(q.xgboost) else None
         rows.append({
             "Kickoff (CT)": pd.Timestamp(q.kickoff).strftime("%a %-I:%M%p"),
             "Game": f"{q.away} @ {q.home}",
             "QB": q.player_name,
             "Books": len(books),
             "Line": line,
-            "Model": q.xgboost_reg,
+            "Model": q.xgboost,
             "Ensemble": q.ensemble,
             "Last 5 avg": q.avg_pass_yds_last5,
-            "Edge": q.xgboost_reg - line,
+            "Edge": q.xgboost - line,
             "Lean": bet["side"] if bet else "-",
             "Best price": f"{bet['book']} {bet['line']:g} ({bet['price']:+.0f})" if bet else "-",
             "Model win %": bet["p_win"] * 100 if bet else np.nan,
@@ -175,7 +159,7 @@ def main():
 
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 20)
-    print(f"Model (xgboost_reg) vs. sportsbook lines, games in the next {args.hours}h\n")
+    print(f"Model (XGBoost) vs. sportsbook lines, games in the next {args.hours}h\n")
     print(shown.to_string(index=False, formatters={
         "Line": "{:.1f}".format, "Model": "{:.0f}".format, "Last 5 avg": "{:.0f}".format,
         "Ensemble": lambda v: "-" if pd.isna(v) else f"{v:.0f}",

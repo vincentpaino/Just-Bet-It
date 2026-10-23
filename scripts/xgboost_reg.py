@@ -8,14 +8,15 @@
 #   4. Split by DATE (train on the past, test on the future)
 #   5. Train XGBRegressor and compare it against simple baselines
 #
+# The loading and feature code here is shared by every model: scripts/train.py
+# trains all of them on build_features(), and backtest.py, predict.py and
+# predict_upcoming.py predict with it, so features can never drift apart.
+#
 # Run from the project root:  python scripts/xgboost_reg.py
 
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
-
-import joblib
 
 import numpy as np
 import pandas as pd
@@ -29,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.db.session import engine  # local DB or shared DATABASE_URL, via .env
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODEL_PATH = PROJECT_ROOT / "models" / "xgboost_reg.pkl"          # read by scripts/backtest.py
 BEST_PARAMS_PATH = PROJECT_ROOT / "configs" / "xgboost_reg_params.json"  # written by xgboost_reg_tune.py
 
 # Hand-picked settings, used until the tuning script has written best_params.json
@@ -92,7 +92,14 @@ FEATURES = [
 
 
 def build_features(raw: pd.DataFrame) -> pd.DataFrame:
-    df = raw.dropna(subset=["game_date", "passing_yards", "attempts"]).copy() # drop NA rows
+    # Rows flagged is_upcoming are games to predict: their stats are unknown
+    # (blank), and every feature below only looks at earlier games anyway.
+    df = raw.copy()
+    if "is_upcoming" not in df:
+        df["is_upcoming"] = False
+    df["is_upcoming"] = df["is_upcoming"].fillna(False).astype(bool)
+    played = df["passing_yards"].notna() & df["attempts"].notna()
+    df = df[df["game_date"].notna() & (played | df["is_upcoming"])].copy()  # drop NA rows
 
     # ---- team offense + opponent defense (uses ALL QBs in a game) ----------
     team = (
@@ -102,9 +109,12 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
             team_att=("attempts", "sum"),
             opp=("opponent_team_id", "first"),
             game_date=("game_date", "first"),
+            upcoming=("is_upcoming", "all"),
         )
         .sort_values(["team_id", "game_date", "game_id"])
     )
+    # An unplayed game has no totals yet (sum() would report a fake 0)
+    team.loc[team["upcoming"], ["team_pass_yds", "team_att"]] = np.nan
     team["team_pass_att_avg"] = prior_mean(team, "team_id", "team_att", 5, 2)
 
     # Yards a defense ALLOWED = passing yards of the team that faced it
@@ -120,7 +130,7 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ---- QB-level rows: real starters only ---------------------------------
-    qb = df[df["attempts"] >= MIN_ATTEMPTS].copy()
+    qb = df[(df["attempts"] >= MIN_ATTEMPTS) | df["is_upcoming"]].copy()
     qb = qb.sort_values(["player_id", "game_date", "game_id"]).reset_index(drop=True)
 
     qb["ypa"] = qb["passing_yards"] / qb["attempts"]
@@ -183,24 +193,39 @@ def filter_trainable(qb: pd.DataFrame) -> pd.DataFrame:
 
 def build_upcoming_features(raw: pd.DataFrame, upcoming: pd.DataFrame) -> pd.DataFrame:
     """
-    Features for games that haven't been played yet (used by
+    Features for games to predict (used by scripts/predict.py and
     scripts/predict_upcoming.py). `upcoming` needs game_id, player_id,
     player_name, team_id, opponent_team_id, game_date, season, week, home_away.
 
-    Each upcoming game is added as a placeholder row and run through the same
-    build_features as training. The placeholder's stats are dummies, but every
-    feature only uses *earlier* games (shift(1)), so they never affect its own
-    features. Returns one row per upcoming game that has enough history.
+    Each game not yet in the data is added as a row with blank stats and run
+    through the same build_features as training; every feature only uses
+    *earlier* games (shift(1)), so nothing about the game itself is needed.
+    A game that's already been played just uses its real row (its features
+    are pregame too). Returns one row per game that has enough history.
     """
-    placeholders = upcoming.assign(
-        game_date=pd.to_datetime(upcoming["game_date"]),
-        passing_yards=0, passing_tds=0, passing_ints=0, completions=0,
-        attempts=MIN_ATTEMPTS,  # keeps the row through build_features' starter filter
-        rushing_yards=0, rushing_attempts=0,
-    )
-    qb = build_features(pd.concat([raw, placeholders], ignore_index=True))
+    played = raw.set_index(["game_id", "player_id"]).index
+    new = upcoming[~upcoming.set_index(["game_id", "player_id"]).index.isin(played)]
+    # Stats for these games are unknown, so they stay blank (no made-up values)
+    rows = new.assign(game_date=pd.to_datetime(new["game_date"]), is_upcoming=True)
+    qb = build_features(pd.concat([raw, rows], ignore_index=True))
     qb = qb.merge(upcoming[["game_id", "player_id"]], on=["game_id", "player_id"])
     return qb[has_history(qb)]
+
+
+def split_by_date(data: pd.DataFrame):
+    """Train on the past, test on the most recent TEST_FRACTION of games.
+    Returns (train, test, cutoff); every script uses this same split."""
+    data = data.sort_values("game_date").reset_index(drop=True)
+    cutoff = data["game_date"].quantile(1 - TEST_FRACTION)
+    return data[data["game_date"] <= cutoff], data[data["game_date"] > cutoff], cutoff
+
+
+def make_xgboost(params: dict) -> xgb.XGBRegressor:
+    return xgb.XGBRegressor(
+        objective="reg:squarederror",  # Default loss for regression
+        random_state=seed,
+        **params,
+    )
 
 
 def load_params() -> tuple[dict, str]:
@@ -242,10 +267,7 @@ if __name__ == "__main__":
     print((data[FEATURES].isna().mean() * 100).round(1).to_string())
 
     # 2. Split the data by date: train on the past, test on the future
-    data = data.sort_values("game_date").reset_index(drop=True)
-    cutoff = data["game_date"].quantile(1 - TEST_FRACTION)
-    train = data[data["game_date"] <= cutoff]
-    test = data[data["game_date"] > cutoff]
+    train, test, cutoff = split_by_date(data)
     print(f"\nTrain: {len(train):,} rows (through {cutoff.date()})")
     print(f"Test:  {len(test):,} rows (after {cutoff.date()})")
 
@@ -255,11 +277,7 @@ if __name__ == "__main__":
     # 3. Initialize the Regressor model
     params, params_source = load_params()
     print(f"\nHyperparameters: {params_source}")
-    reg_model = xgb.XGBRegressor(
-        objective="reg:squarederror",  # Default loss for regression
-        random_state=seed,
-        **params,
-    )
+    reg_model = make_xgboost(params)
 
     # 4. Train and predict
     reg_model.fit(X_train, y_train)
@@ -298,17 +316,5 @@ if __name__ == "__main__":
     ]
     print(sample.head(15).to_string(index=False))
 
-    # 6. Save the model for scripts/backtest.py. train_end is recorded so the
-    #    backtest only scores games the model never trained on.
-    MODEL_PATH.parent.mkdir(exist_ok=True)
-    joblib.dump(
-        {
-            "model": reg_model,
-            "features": FEATURES,
-            "train_end": cutoff,
-            "params": params,
-            "trained_at": datetime.now(),
-        },
-        MODEL_PATH,
-    )
-    print(f"\nSaved model to {MODEL_PATH.relative_to(PROJECT_ROOT)} (trained through {cutoff.date()})")
+    print("\n(This script is for analysis. To train and save every model for")
+    print(" backtest.py / predict.py, run: python -m scripts.train)")
