@@ -44,6 +44,8 @@ with engine.connect() as conn:
             print(f"{t:20} (missing: {type(e).__name__})")
 
 # ---------------------------------------------------------------- 2. master frame
+
+# make sure that all these columns exist
 section("2. GAMES + FEATURES (one row per game)")
 games = pd.read_sql(
     """
