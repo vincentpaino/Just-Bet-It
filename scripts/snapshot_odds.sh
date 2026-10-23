@@ -25,8 +25,31 @@ mkdir -p logs
 PY=.venv/bin/python
 export SSL_CERT_FILE="$("$PY" -c 'import certifi; print(certifi.where())')"
 
+# launchd can start the job during a brief "dark wake" from sleep, before
+# Wi-Fi is back. Wait (up to 15 min) until the database and the Odds API
+# both answer; nothing is spent or written until then.
+wait_for_network() {
+    for attempt in $(seq 1 30); do
+        if "$PY" - <<'PY' >/dev/null 2>&1
+import socket
+from src.db.session import engine
+socket.getaddrinfo("api.the-odds-api.com", 443)
+engine.connect().close()
+PY
+        then
+            [ "$attempt" -gt 1 ] && echo "network up after $(( (attempt - 1) * 30 ))s"
+            return 0
+        fi
+        sleep 30
+    done
+    echo "ERROR: no network after 15 minutes; nothing was run (no credits spent)"
+    return 1
+}
+
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
-    "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
-    "$PY" -m scripts.backup_db
+    wait_for_network
+    # caffeinate keeps the Mac from going back to sleep until the job finishes
+    /usr/bin/caffeinate -i "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
+    /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1

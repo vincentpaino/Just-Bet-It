@@ -181,6 +181,28 @@ def filter_trainable(qb: pd.DataFrame) -> pd.DataFrame:
     return qb[ok].copy()
 
 
+def build_upcoming_features(raw: pd.DataFrame, upcoming: pd.DataFrame) -> pd.DataFrame:
+    """
+    Features for games that haven't been played yet (used by
+    scripts/predict_upcoming.py). `upcoming` needs game_id, player_id,
+    player_name, team_id, opponent_team_id, game_date, season, week, home_away.
+
+    Each upcoming game is added as a placeholder row and run through the same
+    build_features as training. The placeholder's stats are dummies, but every
+    feature only uses *earlier* games (shift(1)), so they never affect its own
+    features. Returns one row per upcoming game that has enough history.
+    """
+    placeholders = upcoming.assign(
+        game_date=pd.to_datetime(upcoming["game_date"]),
+        passing_yards=0, passing_tds=0, passing_ints=0, completions=0,
+        attempts=MIN_ATTEMPTS,  # keeps the row through build_features' starter filter
+        rushing_yards=0, rushing_attempts=0,
+    )
+    qb = build_features(pd.concat([raw, placeholders], ignore_index=True))
+    qb = qb.merge(upcoming[["game_id", "player_id"]], on=["game_id", "player_id"])
+    return qb[has_history(qb)]
+
+
 def load_params() -> tuple[dict, str]:
     """Tuned hyperparameters if the tuning script has saved them, else the defaults."""
     if BEST_PARAMS_PATH.exists():
