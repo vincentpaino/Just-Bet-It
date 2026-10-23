@@ -37,7 +37,7 @@ DEFAULT_PARAMS = {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.05}
 
 # Global variables
 seed = 42
-MIN_ATTEMPTS = 10      # ignore garbage-time backups / trick-play "QBs"
+MIN_ATTEMPTS = 10      # ignore garbage-time backups / trick-play "QBs" (these should be the starters)
 MIN_PRIOR_GAMES = 3    # need some history before we trust rolling averages
 TEST_FRACTION = 0.2    # most recent 20% of games (by date) become the test set
 
@@ -92,7 +92,7 @@ FEATURES = [
 
 
 def build_features(raw: pd.DataFrame) -> pd.DataFrame:
-    df = raw.dropna(subset=["game_date", "passing_yards", "attempts"]).copy()
+    df = raw.dropna(subset=["game_date", "passing_yards", "attempts"]).copy() # drop NA rows
 
     # ---- team offense + opponent defense (uses ALL QBs in a game) ----------
     team = (
