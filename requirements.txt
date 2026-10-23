@@ -11,7 +11,7 @@ alembic
 # --- ML ---
 scikit-learn
 xgboost # brew install libomp -- installs OpenMP runtime needed for this library
-optuna
+optuna # used for automated hyperparameter search/optimization
 
 # --- Data sources ---
 sportsipy
