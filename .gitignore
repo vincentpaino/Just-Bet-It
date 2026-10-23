@@ -34,3 +34,6 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# --- Optuna parameter tuning output ---
+scripts/best_params.json
