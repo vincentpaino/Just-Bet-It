@@ -1,0 +1,53 @@
+# Dashboard look (streamlit run app.py). Fonts are bundled in static/fonts
+# (Barlow, SIL Open Font License) so the app looks the same offline.
+
+[theme]
+base = "light"
+primaryColor = "#1D3557"
+backgroundColor = "#F2F4F1"
+secondaryBackgroundColor = "#E3E8E2"
+textColor = "#14213D"
+font = "Barlow, sans-serif"
+headingFont = "Barlow Condensed, sans-serif"
+borderColor = "#CDD5CB"
+baseRadius = "6px"
+
+[[theme.fontFaces]]
+family = "Barlow"
+url = "app/static/fonts/barlow-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Barlow"
+url = "app/static/fonts/barlow-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Barlow"
+url = "app/static/fonts/barlow-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Barlow Condensed"
+url = "app/static/fonts/barlow-condensed-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Barlow Condensed"
+url = "app/static/fonts/barlow-condensed-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Barlow Condensed"
+url = "app/static/fonts/barlow-condensed-latin-700-normal.woff2"
+weight = 700
+
+[server]
+headless = true
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"

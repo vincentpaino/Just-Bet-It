@@ -35,6 +35,18 @@ scripts/        CLI entry points (train.py, predict.py, backtest.py)
    ```
    alembic upgrade head
    ```
+## Dashboard
+
+A web UI over the same models and data: this week's picks vs. sportsbook
+lines, a QB lookup, the backtest, and model/database status (with a
+retrain button). From the project root, after `python -m scripts.train`:
+
+```
+streamlit run app.py
+```
+
+It opens at http://localhost:8501. Code is in `app.py`; theme and bundled
+fonts are in `.streamlit/config.toml` and `static/fonts/`.
 
 ## Database
 

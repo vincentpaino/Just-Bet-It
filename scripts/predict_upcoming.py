@@ -39,6 +39,13 @@ def normal_cdf(z: float) -> float:
     return 0.5 * (1 + erf(z / sqrt(2)))
 
 
+def format_kickoff(kickoff) -> str:
+    """e.g. "Sat 2:30PM". Builds the hour by hand: "%-I" (no leading zero)
+    works on macOS/Linux but raises ValueError on Windows."""
+    t = pd.Timestamp(kickoff)
+    return f"{t:%a} {t.hour % 12 or 12}:{t:%M%p}"
+
+
 def payout(price: float) -> float:
     """Profit on a winning 1-unit bet at American odds."""
     return price / 100 if price > 0 else 100 / -price
@@ -138,7 +145,7 @@ def main():
         line = books["line"].median()
         bet = best_bet(books, q.xgboost) if pd.notna(q.xgboost) else None
         rows.append({
-            "Kickoff (CT)": pd.Timestamp(q.kickoff).strftime("%a %-I:%M%p"),
+            "Kickoff (CT)": format_kickoff(q.kickoff),
             "Game": f"{q.away} @ {q.home}",
             "QB": q.player_name,
             "Books": len(books),
