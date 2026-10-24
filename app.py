@@ -28,11 +28,10 @@ sys.path.insert(0, str(ROOT))
 st.set_page_config(page_title="Just Bet It", page_icon="🏈", layout="wide")
 
 from scripts.backtest import american_payout, load_closing_prop_lines, simulate_betting_strategy  # noqa: E402
-from scripts.predict_upcoming import (  # noqa: E402
-    PREDICTION_SD, best_bet, format_kickoff, load_upcoming_lines, upcoming_qbs,
-)
+from scripts.predict_upcoming import format_kickoff, load_upcoming_lines, upcoming_qbs  # noqa: E402
 from scripts.train import MODELS_PATH, load_models, predict_all  # noqa: E402
 from scripts.xgboost_reg import build_features, build_upcoming_features, has_history, load_qb_games  # noqa: E402
+from src.betting import BetConfig, best_bet, cap_exposure, evaluate_side, from_bundle, simulate_bankroll  # noqa: E402
 from src.db.session import SessionLocal, engine  # noqa: E402
 
 OVER, UNDER, INK, MUTED, GOLD = "#1F7A4D", "#B03A2E", "#14213D", "#5B6573", "#C9A227"
@@ -51,7 +50,7 @@ st.markdown(f"""
   .summary {{ font-size: 1.08rem; color: {INK}; max-width: 70ch; margin: .2rem 0 1.2rem; }}
   .note {{ color: {MUTED}; font-size: .85rem; max-width: 80ch; }}
 
-  .pick {{ display: grid; grid-template-columns: 190px 170px minmax(260px, 1fr) 150px 92px;
+  .pick {{ display: grid; grid-template-columns: 180px 160px minmax(240px, 1fr) 140px 160px;
            gap: 1.1rem; align-items: center; padding: .9rem 0; border-bottom: 1px solid #D7DDD5; }}
   .pick:first-of-type {{ border-top: 1px solid #D7DDD5; }}
   .when {{ color: {MUTED}; font-size: .85rem; }}
@@ -61,6 +60,7 @@ st.markdown(f"""
   .lean {{ font-family: 'Barlow Condensed', sans-serif; font-size: 1.25rem; font-weight: 700; }}
   .price {{ color: {MUTED}; font-size: .85rem; }}
   .ev {{ font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 600; text-align: right; }}
+  .ev small.stake {{ color: {INK}; font-weight: 600; }}
   .ev small {{ display: block; font-family: 'Barlow', sans-serif; font-size: .78rem; color: {MUTED};
                font-weight: 400; }}
 
@@ -138,9 +138,11 @@ def history_predictions(mtime):
 
 
 @st.cache_data(ttl=300, show_spinner="Pricing this week's lines...")
-def upcoming_picks(hours, mtime):
+def upcoming_picks(hours, mtime, min_ev, kelly):
     """Same logic as scripts/predict_upcoming.py, kept as data instead of printed text."""
     b = bundle()
+    prob_model = from_bundle(b, "xgboost")
+    config = BetConfig(min_ev=min_ev, kelly_multiplier=kelly)
     lines = load_upcoming_lines(hours)
     if lines.empty:
         return lines, pd.DataFrame()
@@ -163,7 +165,7 @@ def upcoming_picks(hours, mtime):
         books = lines[(lines["game_id"] == q.game_id) & (lines["player_id"] == q.player_id)]
         line = books["line"].median()
         has_model = pd.notna(q.xgboost)
-        bet = best_bet(books, q.xgboost) if has_model else None
+        bet = best_bet(books, q.xgboost, prob_model, config) if has_model else None
         rows.append({
             "game_id": q.game_id, "player_id": q.player_id,
             "kickoff": pd.Timestamp(q.kickoff), "when": format_kickoff(q.kickoff),
@@ -177,9 +179,15 @@ def upcoming_picks(hours, mtime):
             "best_line": bet["line"] if bet else np.nan,
             "best_price": bet["price"] if bet else np.nan,
             "p_win": bet["p_win"] if bet else np.nan,
+            "market_p_win": bet["market_p_win"] if bet else np.nan,
             "ev": bet["ev"] if bet else np.nan,
+            "stake": bet["stake"] if bet else 0.0,
+            "qualifies": bool(bet["qualifies"]) if bet else False,
         })
-    return lines, pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    # Bets in the window are placed together, so their combined stake is capped like one day's slate
+    table["stake"] = cap_exposure(table["stake"], config.max_daily_exposure)
+    return lines, table
 
 
 @st.cache_data(ttl=600, show_spinner="Loading closing lines...")
@@ -242,7 +250,7 @@ def yard_strip(line, model, last5, lean):
     return "".join(parts)
 
 
-def pick_row(p):
+def pick_row(p, bankroll, min_ev):
     e = html.escape
     if isinstance(p["lean"], str):  # missing values arrive as NaN, which is truthy
         color = OVER if p["lean"] == "OVER" else UNDER
@@ -250,8 +258,12 @@ def pick_row(p):
                 f'<div class="price">{e(p["best_book"])} {american(p["best_price"])}</div>')
         ev_color = OVER if p["ev"] > 0 else MUTED
         ev_text = f'{p["ev"]:+.2f}' if abs(p["ev"]) >= 0.005 else "0.00"
+        if p["qualifies"]:
+            sizing = f'<small class="stake">Bet {p["stake"] * bankroll:.2f} units</small>'
+        else:
+            sizing = f'<small>Pass: EV under {min_ev:+.2f}</small>'
         ev = (f'<div class="ev" style="color:{ev_color}">{ev_text}'
-              f'<small>{p["p_win"]:.0%} model win</small></div>')
+              f'<small>{p["p_win"]:.0%} model, {p["market_p_win"]:.0%} market</small>{sizing}</div>')
     else:
         lean = '<div class="price">Not enough history to predict</div>'
         ev = '<div class="ev"></div>'
@@ -269,13 +281,14 @@ LEGEND = f"""
   <span><i class="sw" style="width:3px;height:16px;background:{INK}"></i>Sportsbook line (median across books)</span>
   <span><i class="sw" style="width:12px;height:12px;border-radius:50%;background:{OVER}"></i>XGBoost prediction</span>
   <span><i class="sw" style="width:9px;height:9px;border-radius:50%;border:2px solid {MUTED}"></i>Last 5 games average</span>
-  <span>EV is expected profit per 1-unit bet at the best price</span>
+  <span>EV is expected profit per 1-unit bet at the best price; market is the books' no-vig chance</span>
 </div>
 """
 
-DISCLAIMER = ("Not betting advice. These models haven't been shown to beat real lines yet (see Backtest), "
-              f"and win chances assume the model's misses are normally spread with a {PREDICTION_SD:.0f}-yard "
-              "standard deviation, so they're likely overconfident.")
+DISCLAIMER = ("Not betting advice. These models haven't been shown to beat real lines yet (see Backtest). "
+              "Model win chances come from how far off its past predictions were; when the model is far "
+              "more confident than the market, the model is usually the one that's wrong. Stakes are "
+              "fractional Kelly, capped at 5% of bankroll per bet.")
 
 
 def require_models():
@@ -297,8 +310,16 @@ def page_picks():
         min_edge = st.slider("Minimum edge (yards)", 0, 80, 0, step=5,
                              help="Only show QBs where the model and the line differ by at least this much")
         sort = st.radio("Sort by", ["Expected value", "Edge", "Kickoff"], horizontal=False)
+        st.subheader("Bet sizing")
+        bankroll = st.number_input("Bankroll (units)", min_value=1.0, value=100.0, step=10.0)
+        min_ev = st.slider("Minimum EV to bet", 0.0, 0.20, BetConfig.min_ev, step=0.01, format="%.2f",
+                           help="Expected profit per 1 unit staked. Bets below this are passed.")
+        kelly = st.select_slider("Kelly fraction", options=[0.1, 0.25, 0.5, 1.0], value=BetConfig.kelly_multiplier,
+                                 format_func=lambda k: {0.1: "Tenth", 0.25: "Quarter", 0.5: "Half", 1.0: "Full"}[k],
+                                 help="Share of the full Kelly stake to bet. Quarter is the usual choice "
+                                      "because full Kelly punishes overconfident probabilities hard.")
 
-    lines, picks = upcoming_picks(hours, model_mtime())
+    lines, picks = upcoming_picks(hours, model_mtime(), min_ev, kelly)
     st.header("This week's picks")
     if picks.empty:
         st.info(f"No stored prop lines for games kicking off in the next {hours} hours. "
@@ -308,10 +329,13 @@ def page_picks():
 
     priced = picks[picks["lean"].notna()]
     big = priced[priced["edge"].abs() >= 15]
+    bets = picks[picks["qualifies"]]
     st.markdown(
         f'<p class="summary">{len(picks)} quarterbacks have lines for games in the next {hours} hours. '
-        f'The model disagrees with the line by 15+ yards on {len(big)} of them, and sees positive '
-        f'expected value on {int((priced["ev"] > 0).sum())}.</p>', unsafe_allow_html=True)
+        f'The model disagrees with the line by 15+ yards on {len(big)} of them. {len(bets)} clear the '
+        f'{min_ev:+.2f} EV filter, for a total stake of {bets["stake"].sum() * bankroll:.2f} units '
+        f'({bets["stake"].sum():.0%} of bankroll; all bets together are capped at '
+        f'{BetConfig.max_daily_exposure:.0%}).</p>', unsafe_allow_html=True)
 
     shown = picks[picks["edge"].abs().fillna(0) >= min_edge] if min_edge else picks
     key = {"Expected value": ("ev", False), "Edge": ("edge", False), "Kickoff": ("kickoff", True)}[sort]
@@ -324,7 +348,7 @@ def page_picks():
         st.info(f"No QBs with an edge of {min_edge}+ yards. Lower the minimum edge to see more.")
     else:
         st.markdown(LEGEND, unsafe_allow_html=True)
-        st.markdown("".join(pick_row(p) for _, p in shown.iterrows()), unsafe_allow_html=True)
+        st.markdown("".join(pick_row(p, bankroll, min_ev) for _, p in shown.iterrows()), unsafe_allow_html=True)
 
     st.subheader("Compare sportsbooks")
     options = shown[["game_id", "player_id", "qb", "matchup"]].drop_duplicates()
@@ -335,10 +359,12 @@ def page_picks():
         books = lines[(lines["game_id"] == choice.game_id) & (lines["player_id"] == choice.player_id)]
         table = books[["sportsbook", "line", "over_odds", "under_odds"]].sort_values("line").copy()
         if pd.notna(p["model"]):
-            from scripts.predict_upcoming import normal_cdf, payout
-            p_over = 1 - table["line"].map(lambda ln: normal_cdf((ln - p["model"]) / PREDICTION_SD))
-            table["Over EV"] = p_over * table["over_odds"].map(payout) - (1 - p_over)
-            table["Under EV"] = (1 - p_over) * table["under_odds"].map(payout) - p_over
+            prob_model = from_bundle(bundle(), "xgboost")
+            for side in ("OVER", "UNDER"):
+                price_col = "over_odds" if side == "OVER" else "under_odds"
+                table[f"{side.title()} EV"] = [
+                    evaluate_side(p["model"], r.line, getattr(r, price_col), side, prob_model)["ev"]
+                    for r in table.itertuples()]
         st.dataframe(
             table, hide_index=True, width="stretch",
             column_config={
@@ -354,7 +380,8 @@ def page_picks():
     with st.expander("All numbers as a table"):
         st.dataframe(
             shown[["when", "matchup", "qb", "books", "line", "model", "ensemble", "last5", "edge",
-                   "lean", "best_book", "best_line", "best_price", "p_win", "ev"]],
+                   "lean", "best_book", "best_line", "best_price", "p_win", "market_p_win", "ev", "stake"]].assign(
+                       stake=lambda d: d["stake"] * bankroll),
             hide_index=True, width="stretch",
             column_config={
                 "when": "Kickoff (CT)", "matchup": "Game", "qb": "QB", "books": "Books",
@@ -367,7 +394,9 @@ def page_picks():
                 "best_line": st.column_config.NumberColumn("Best line", format="%.1f"),
                 "best_price": st.column_config.NumberColumn("Price", format="%+d"),
                 "p_win": st.column_config.ProgressColumn("Model win %", format="percent", min_value=0, max_value=1),
+                "market_p_win": st.column_config.NumberColumn("Market %", format="percent"),
                 "ev": st.column_config.NumberColumn("EV / unit", format="%+.2f"),
+                "stake": st.column_config.NumberColumn("Stake (units)", format="%.2f"),
             },
         )
     st.markdown(f'<p class="note">{DISCLAIMER}</p>', unsafe_allow_html=True)
@@ -555,6 +584,53 @@ def page_backtest():
     zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=MUTED, strokeDash=[3, 3]).encode(y="y:Q")
     st.altair_chart((zero + chart).properties(height=320), width="stretch")
     st.caption("Flat 1-unit bets at each book's last pregame price; pushes return the stake.")
+
+    st.subheader("Kelly bankroll")
+    st.markdown('<p class="note">Bets only when expected value clears the minimum, sized as a fraction '
+                'of full Kelly from each model\'s win chance, replayed in date order. Games on the same day '
+                'are sized from that morning\'s bankroll, and one day\'s bets together never exceed 30% of it.'
+                '</p>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    min_ev = c1.slider("Minimum EV", 0.0, 0.20, BetConfig.min_ev, step=0.01, format="%.2f", key="bt_ev")
+    kelly = c2.select_slider("Kelly fraction", options=[0.1, 0.25, 0.5, 1.0], value=BetConfig.kelly_multiplier,
+                             format_func=lambda k: {0.1: "Tenth", 0.25: "Quarter", 0.5: "Half", 1.0: "Full"}[k],
+                             key="bt_kelly")
+    start = c3.number_input("Starting bankroll", min_value=1.0, value=100.0, step=10.0, key="bt_bank")
+    config = BetConfig(min_ev=min_ev, min_edge_yards=edge, kelly_multiplier=kelly)
+    summary, paths = [], []
+    for key, name in MODEL_NAMES.items():
+        log, k = simulate_bankroll(bets, key, from_bundle(b, key), config, start=start)
+        summary.append({"Model": name, "Bets": k["bets"], "Win rate": k["win_rate"], "Staked": k["staked"],
+                        "Profit": k["profit"], "ROI on stakes": k["roi"], "Final bankroll": k["final"],
+                        "Worst drawdown": k["max_drawdown"]})
+        if len(log):
+            paths.append(pd.DataFrame({"Bet number": np.arange(0, len(log) + 1),
+                                       "Bankroll": np.r_[start, log["bankroll"].to_numpy()], "Model": name}))
+    st.dataframe(pd.DataFrame(summary), hide_index=True, width="stretch", column_config={
+        "Win rate": st.column_config.NumberColumn(format="percent"),
+        "Staked": st.column_config.NumberColumn(format="%.2f"),
+        "Profit": st.column_config.NumberColumn(format="%+.2f"),
+        "ROI on stakes": st.column_config.NumberColumn(format="percent"),
+        "Final bankroll": st.column_config.NumberColumn(format="%.2f"),
+        "Worst drawdown": st.column_config.NumberColumn(format="percent",
+                                                        help="Largest fall from a peak, measured at the end of each day"),
+    })
+    if paths:
+        paths = pd.concat(paths)
+        chart = alt.Chart(paths).mark_line(strokeWidth=2).encode(
+            x="Bet number:Q", y=alt.Y("Bankroll:Q", title="Bankroll (units)", scale=alt.Scale(zero=False)),
+            color=alt.Color("Model:N", scale=alt.Scale(domain=list(MODEL_NAMES.values()),
+                            range=[INK, GOLD, "#6C8EAD", "#A3A9B3", "#8C6D9E"]), legend=alt.Legend(orient="top")),
+            strokeWidth=alt.condition(alt.datum.Model == "XGBoost", alt.value(3), alt.value(1.5)))
+        base = alt.Chart(pd.DataFrame({"y": [start]})).mark_rule(color=MUTED, strokeDash=[3, 3]).encode(y="y:Q")
+        st.altair_chart((base + chart).properties(height=320), width="stretch")
+    else:
+        st.info("No bets cleared the minimum EV. Lower it to see a bankroll path.")
+    if "residuals" not in b:
+        st.caption("This models file has no saved misses, so win chances use a bell curve. "
+                   "Retrain on the Models & data page to use each model's real misses.")
+    st.caption("Win chances come from the models' misses on their training test set, which can overlap "
+               "these games, so treat this as an optimistic estimate.")
 
 
 def page_models():

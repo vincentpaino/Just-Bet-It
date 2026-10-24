@@ -9,9 +9,17 @@ after the models' training cutoff are scored, so the sample grows as the
 weekly snapshots accumulate. Features come from the same code the models
 were trained with (scripts/xgboost_reg.py).
 
+It runs two simulations:
+  1. flat 1-unit bets on every game where the model and line differ by more
+     than --edge-threshold yards,
+  2. a Kelly bankroll (src/betting): only bets with expected value of at least
+     --min-ev, sized at --kelly times full Kelly from the model's win
+     probability, replayed in date order.
+
 Run from the project root (after python -m scripts.train):
     python -m scripts.backtest
     python -m scripts.backtest --edge-threshold 15
+    python -m scripts.backtest --min-ev 0.05 --kelly 0.25 --bankroll 100
 """
 import argparse
 import sys
@@ -22,6 +30,7 @@ from sqlalchemy import text
 
 from scripts.train import MODELS_PATH, load_models, predict_all
 from scripts.xgboost_reg import PROJECT_ROOT, build_features, has_history, load_qb_games
+from src.betting import BetConfig, from_bundle, simulate_bankroll
 from src.db.session import SessionLocal
 
 
@@ -142,6 +151,12 @@ def main():
     parser = argparse.ArgumentParser(description="Backtest QB passing-yards models against stored pregame lines")
     parser.add_argument("--edge-threshold", type=float, default=0.0,
                         help="Minimum |prediction - line| in yards to place a bet")
+    parser.add_argument("--min-ev", type=float, default=BetConfig.min_ev,
+                        help="Kelly simulation: minimum expected profit per unit to bet")
+    parser.add_argument("--kelly", type=float, default=BetConfig.kelly_multiplier,
+                        help="Kelly simulation: fraction of full Kelly to bet (0.25 = quarter Kelly)")
+    parser.add_argument("--bankroll", type=float, default=100.0,
+                        help="Kelly simulation: starting bankroll in units")
     args = parser.parse_args()
 
     print("QB Passing Yards Model Backtesting")
@@ -219,6 +234,30 @@ def main():
         print(f"  ROI: {results['roi']:.1%}")
         print(f"  Average edge: {results['avg_edge']:.2f} yards")
 
+    # Kelly bankroll simulation
+    config = BetConfig(min_ev=args.min_ev, min_edge_yards=args.edge_threshold,
+                       kelly_multiplier=args.kelly)
+    print("\nKelly bankroll simulation (src/betting):")
+    print("-" * 50)
+    print(f"{args.kelly:g}x Kelly, bets with EV >= {args.min_ev:+.2f}, max {config.max_stake:.0%} "
+          f"per bet and {config.max_daily_exposure:.0%} per day, starting at {args.bankroll:g} units")
+    if "residuals" not in bundle:
+        print("NOTE: this models file has no saved residuals, so win chances use a normal curve.")
+        print("      Retrain (python -m scripts.train) to use the models' real misses.")
+    for name, pred in all_predictions.items():
+        bets[f"pred_{name}"] = pred
+        prob_model = from_bundle(bundle, name)
+        _, k = simulate_bankroll(bets, f"pred_{name}", prob_model, config, start=args.bankroll)
+        print(f"\n{name.upper()}:  ({prob_model.method})")
+        if k["bets"] == 0:
+            print("  No bets cleared the EV filter.")
+            continue
+        print(f"  Bets placed: {k['bets']}  ({k['wins']} won / {k['losses']} lost / {k['pushes']} pushed, "
+              f"win rate {k['win_rate']:.1%})")
+        print(f"  Staked: {k['staked']:.2f} units | profit {k['profit']:+.2f} | ROI on stakes {k['roi']:.1%}")
+        print(f"  Bankroll: {k['start']:g} -> {k['final']:.2f} ({k['growth']:+.1%}), "
+              f"worst drawdown {k['max_drawdown']:.1%}")
+
     print("\n" + "=" * 50)
     print("BACKTESTING COMPLETE")
     print("=" * 50)
@@ -228,6 +267,8 @@ def main():
     print("- Only games after the models' training cutoff are scored")
     print("- The models only cover starters, so games where the QB threw fewer")
     print("  than 10 passes (e.g. injured early) aren't scored")
+    print("- Win chances come from the models' misses on the training test set,")
+    print("  which can overlap these games; treat Kelly results as optimistic")
     return 0
 
 

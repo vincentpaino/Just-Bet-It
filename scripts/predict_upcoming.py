@@ -7,20 +7,22 @@ hasn't kicked off, this prints:
     ensemble (average of all four models) and the QB's last-5-game average,
   - which side the model leans and the best available price for that side
     across books (line shopping, Doc II Section 6.3),
-  - a rough model win probability and expected value per 1-unit bet.
+  - the model's win probability (from its real held-out misses, see
+    src/betting/probability.py), the market's no-vig probability for the same
+    side, expected value per 1-unit bet, and a quarter-Kelly stake for bets
+    that clear the minimum EV (src/betting).
 
 These are NOT validated betting recommendations: the model hasn't yet been
-shown to beat real lines (see scripts/backtest.py), and the win probability
-assumes the model's errors are normal with its test RMSE as the spread.
+shown to beat real lines (see scripts/backtest.py).
 
 Run from the project root (after training: python -m scripts.train):
     python -m scripts.predict_upcoming
-    python -m scripts.predict_upcoming --hours 48 --min-edge 15
+    python -m scripts.predict_upcoming --hours 48 --min-edge 15 --min-ev 0.05
+    python -m scripts.predict_upcoming --bankroll 500 --kelly 0.5
 """
 
 import argparse
 import sys
-from math import erf, sqrt
 
 import numpy as np
 import pandas as pd
@@ -28,15 +30,8 @@ from sqlalchemy import text
 
 from scripts.train import MODELS_PATH, load_models, predict_all
 from scripts.xgboost_reg import PROJECT_ROOT, build_upcoming_features, load_qb_games
+from src.betting import BetConfig, best_bet, cap_exposure, from_bundle
 from src.db.session import engine
-
-# Rough spread of the model's errors (its test RMSE, in yards), used to turn
-# "prediction vs line" into a win probability.
-PREDICTION_SD = 80.0
-
-
-def normal_cdf(z: float) -> float:
-    return 0.5 * (1 + erf(z / sqrt(2)))
 
 
 def format_kickoff(kickoff) -> str:
@@ -44,11 +39,6 @@ def format_kickoff(kickoff) -> str:
     works on macOS/Linux but raises ValueError on Windows."""
     t = pd.Timestamp(kickoff)
     return f"{t:%a} {t.hour % 12 or 12}:{t:%M%p}"
-
-
-def payout(price: float) -> float:
-    """Profit on a winning 1-unit bet at American odds."""
-    return price / 100 if price > 0 else 100 / -price
 
 
 def load_upcoming_lines(hours: int) -> pd.DataFrame:
@@ -93,26 +83,19 @@ def upcoming_qbs(lines: pd.DataFrame) -> pd.DataFrame:
     return qbs
 
 
-def best_bet(books: pd.DataFrame, prediction: float):
-    """The side and book with the highest expected value, given the model's prediction."""
-    best = None
-    for book in books.itertuples():
-        p_over = 1 - normal_cdf((book.line - prediction) / PREDICTION_SD)
-        for side, p_win, price in [("OVER", p_over, book.over_odds),
-                                   ("UNDER", 1 - p_over, book.under_odds)]:
-            ev = p_win * payout(price) - (1 - p_win)
-            if best is None or ev > best["ev"]:
-                best = {"side": side, "book": book.sportsbook, "line": book.line,
-                        "price": price, "p_win": p_win, "ev": ev}
-    return best
-
-
 def main():
     parser = argparse.ArgumentParser(description="Model predictions vs. stored prop lines for upcoming games")
     parser.add_argument("--hours", type=int, default=72, help="Only games kicking off within this many hours")
     parser.add_argument("--min-edge", type=float, default=0.0,
                         help="Only show QBs where |model - line| is at least this many yards")
+    parser.add_argument("--min-ev", type=float, default=BetConfig.min_ev,
+                        help="Only size a bet if its expected profit per unit is at least this")
+    parser.add_argument("--kelly", type=float, default=BetConfig.kelly_multiplier,
+                        help="Fraction of full Kelly to bet (0.25 = quarter Kelly)")
+    parser.add_argument("--bankroll", type=float, default=100.0,
+                        help="Bankroll in units, to show stakes in units")
     args = parser.parse_args()
+    config = BetConfig(min_ev=args.min_ev, min_edge_yards=args.min_edge, kelly_multiplier=args.kelly)
 
     bundle = load_models()
     if bundle is None:
@@ -126,6 +109,7 @@ def main():
         return 0
 
     qbs = upcoming_qbs(lines)
+    prob_model = from_bundle(bundle, "xgboost")
 
     # Predictions from every model, using the same feature code they were trained with
     features = build_upcoming_features(
@@ -143,7 +127,7 @@ def main():
     for q in qbs.itertuples():
         books = lines[(lines["game_id"] == q.game_id) & (lines["player_id"] == q.player_id)]
         line = books["line"].median()
-        bet = best_bet(books, q.xgboost) if pd.notna(q.xgboost) else None
+        bet = best_bet(books, q.xgboost, prob_model, config) if pd.notna(q.xgboost) else None
         rows.append({
             "Kickoff (CT)": format_kickoff(q.kickoff),
             "Game": f"{q.away} @ {q.home}",
@@ -157,27 +141,39 @@ def main():
             "Lean": bet["side"] if bet else "-",
             "Best price": f"{bet['book']} {bet['line']:g} ({bet['price']:+.0f})" if bet else "-",
             "Model win %": bet["p_win"] * 100 if bet else np.nan,
+            "Market %": bet["market_p_win"] * 100 if bet else np.nan,
             "EV/unit": bet["ev"] if bet else np.nan,
+            "Stake": bet["stake"] * args.bankroll if bet else 0.0,
         })
 
     table = pd.DataFrame(rows)
+    # These bets are placed together, so cap their combined stake like one day's slate
+    table["Stake"] = cap_exposure(table["Stake"] / args.bankroll, config.max_daily_exposure) * args.bankroll
     no_model = table["Model"].isna()
     shown = table[~no_model & (table["Edge"].abs() >= args.min_edge)].sort_values("EV/unit", ascending=False)
 
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 20)
-    print(f"Model (XGBoost) vs. sportsbook lines, games in the next {args.hours}h\n")
+    print(f"Model (XGBoost) vs. sportsbook lines, games in the next {args.hours}h")
+    print(f"Win %: {prob_model.method}. Stakes: {args.kelly:g}x Kelly on a {args.bankroll:g}-unit "
+          f"bankroll, bets with EV >= {args.min_ev:+.2f} only (max {config.max_stake:.0%} each, "
+          f"{config.max_daily_exposure:.0%} in total)\n")
     print(shown.to_string(index=False, formatters={
         "Line": "{:.1f}".format, "Model": "{:.0f}".format, "Last 5 avg": "{:.0f}".format,
         "Ensemble": lambda v: "-" if pd.isna(v) else f"{v:.0f}",
-        "Edge": "{:+.0f}".format, "Model win %": "{:.0f}%".format, "EV/unit": "{:+.2f}".format,
+        "Edge": "{:+.0f}".format, "Model win %": "{:.0f}%".format, "Market %": "{:.0f}%".format,
+        "EV/unit": "{:+.2f}".format, "Stake": lambda v: f"{v:.2f}" if v > 0 else "-",
     }))
+    sized = shown[shown["Stake"] > 0]
+    print(f"\n{len(sized)} bets clear the filters; total stake {sized['Stake'].sum():.2f} units "
+          f"({sized['Stake'].sum() / args.bankroll:.1%} of bankroll)")
 
     if no_model.any():
         print(f"\nNot enough history to predict: {', '.join(table.loc[no_model, 'QB'])}")
 
     print("\nNOT betting advice: these predictions haven't been validated against real results yet")
-    print("(see scripts/backtest.py). Win % assumes normally distributed errors and is likely overconfident.")
+    print("(see scripts/backtest.py). Market % is the books' no-vig probability for the same side;")
+    print("a model far more confident than the market is more often wrong than right.")
     return 0
 
 
