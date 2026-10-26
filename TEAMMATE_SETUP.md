@@ -228,7 +228,12 @@ at 9am Friday, the job runs when it wakes.
 models' picks into `reports/weekly_results.md` (week-by-week record, units,
 and how close the models were vs. the sportsbook line), with every pick in
 `reports/graded_picks.csv`. Graded games are only ever added, never
-rewritten, so retraining later can't change past weeks. Commit the two files
+rewritten, so retraining later can't change past weeks. It also tracks a
+pre-registered "confident picks" strategy (bet only when XGBoost is 15+ yards
+from the line and all four models pick the same side), counting only games
+played after the rule was registered on 2026-10-26, so it can't be tuned to
+results already seen. To try a different rule, register a new one with a new
+date in `CONFIDENT_RULE` instead of editing this one. Commit the two files
 to share the latest week, or run `python -m scripts.weekly_report` yourself.
 
 `scripts/backtest.py` scores the models against each book's last line before

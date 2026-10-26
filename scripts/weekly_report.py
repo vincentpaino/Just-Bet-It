@@ -14,6 +14,10 @@ A game is graded with whatever models are trained at the time, and only if
 it's after their training cutoff (same rule as backtest.py). Picks are flat
 1-unit bets on the side the model favors, paid at the book's real price.
 
+Two strategies are tracked: betting every game, and "confident picks", a
+rule fixed in advance (CONFIDENT_RULE) that only counts games played after
+the date it was registered, so it can't be tuned to results already seen.
+
 The weekly job (scripts/snapshot_odds.sh) runs this right after it pulls the
 previous weekend's results. Run by hand from the project root:
     python -m scripts.weekly_report
@@ -38,6 +42,16 @@ SUMMARY_PATH = REPORTS_DIR / "weekly_results.md"
 TRACKED = ["xgboost", "ensemble"]
 BREAK_EVEN = 0.524   # win rate needed at -110
 
+# Pre-registered "confident picks" strategy: decided on the date below, BEFORE
+# any of the games it's scored on were played. Don't change it after the fact;
+# to try a different rule, register a new one with a new date.
+CONFIDENT_RULE = {
+    "registered": "2026-10-26",   # only games played after this date count
+    "min_edge": 15.0,             # |XGBoost prediction - line| in yards
+    # ...and all of these models must pick the same side of the line
+    "models": ["linear_regression", "random_forest", "xgboost", "neural_network"],
+}
+
 
 def grade(pred: float, actual: float, line: float, over_odds: float, under_odds: float):
     """(pick, result, units) for a flat 1-unit bet on the side the prediction favors."""
@@ -49,6 +63,19 @@ def grade(pred: float, actual: float, line: float, over_odds: float, under_odds:
     won = (actual > line) == (pick == "OVER")
     price = over_odds if pick == "OVER" else under_odds
     return pick, ("win" if won else "loss"), round(float(american_payout(price)) if won else -1.0, 3)
+
+
+def is_confident(preds: dict, line: float, game_date: str, rule: dict = CONFIDENT_RULE):
+    """
+    Whether a game is a confident pick under the pre-registered rule: XGBoost
+    is at least min_edge yards from the line and every listed model is on the
+    same side. Returns None for games played on or before the registration
+    date (not eligible: the rule was chosen after seeing them).
+    """
+    if game_date <= rule["registered"]:
+        return None
+    sides = {np.sign(preds[name] - line) for name in rule["models"]}
+    return bool(abs(preds["xgboost"] - line) >= rule["min_edge"] and len(sides) == 1 and 0 not in sides)
 
 
 def new_graded_rows(bundle, already: set) -> pd.DataFrame:
@@ -82,6 +109,11 @@ def new_graded_rows(bundle, already: set) -> pd.DataFrame:
             pick, result, units = grade(pred, row["actual"], row["line"], row["over_odds"], row["under_odds"])
             row.update({f"{name}_pred": round(pred, 1), f"{name}_pick": pick,
                         f"{name}_result": result, f"{name}_units": units})
+        # Confident pick = XGBoost's pick, but only when the rule says so
+        row["confident_pick"] = is_confident(
+            {name: float(preds[name][i]) for name in CONFIDENT_RULE["models"]},
+            row["line"], row["game_date"],
+        )
         row["model_trained_through"] = pd.Timestamp(bundle["train_end"]).date().isoformat()
         row["model_features"] = len(bundle["features"])   # 17 = stats only, 20 = stats + market
         row["graded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -124,9 +156,42 @@ def summary_markdown(picks: pd.DataFrame) -> str:
     for season, df in picks.groupby("season", sort=True):
         out.append(line_for(f"**{season} total**", "", df, ""))
 
+    out += confident_section(picks)
+
     out += ["", "Every graded pick, with the line, prices and model version, is in `reports/graded_picks.csv`.",
             "Small samples are noisy: a few hundred bets are needed before a win rate means much.", ""]
     return "\n".join(out)
+
+
+def confident_section(picks: pd.DataFrame) -> list:
+    """Week-by-week record of the pre-registered confident-picks strategy."""
+    rule = CONFIDENT_RULE
+    out = ["", "## Confident picks (pre-registered)", "",
+           f"Rule registered {rule['registered']}, before any of these games were played: bet XGBoost's "
+           f"side only when it's at least {rule['min_edge']:g} yards from the line **and** all four models "
+           "(linear regression, random forest, XGBoost, neural net) pick the same side. Only games "
+           f"played after {rule['registered']} count. Compare against \"bet every game\" above.", ""]
+
+    flag = picks.get("confident_pick")
+    eligible = picks[flag.notna()] if flag is not None else picks.iloc[0:0]
+    if eligible.empty:
+        return out + [f"_No eligible games graded yet; tracking starts with games after {rule['registered']}._"]
+
+    chosen = eligible[eligible["confident_pick"].astype(str) == "True"]
+    header = "| Season | Week | Eligible games | Confident picks | W-L | Win % | Units |"
+    out += [header, "|" + "---|" * (header.count("|") - 1)]
+    pct = lambda v: "-" if np.isnan(v) else f"{v:.1%}"
+
+    def row(label_season, label_week, elig, ch):
+        r = record(ch["xgboost_result"], ch["xgboost_units"])
+        return (f"| {label_season} | {label_week} | {len(elig)} | {len(ch)} | {r['wl']} | "
+                f"{pct(r['pct'])} | {r['units']:+.2f} |")
+
+    for (season, week), elig in eligible.groupby(["season", "week"], sort=True):
+        out.append(row(season, week, elig, chosen[(chosen["season"] == season) & (chosen["week"] == week)]))
+    for season, elig in eligible.groupby("season", sort=True):
+        out.append(row(f"**{season} total**", "", elig, chosen[chosen["season"] == season]))
+    return out
 
 
 def main():
