@@ -157,13 +157,19 @@ python -m scripts.train              # train all 4 models + ensemble -> models/q
 python -m scripts.predict_upcoming   # predictions vs. sportsbook lines for upcoming games
 python -m scripts.predict --qb-id 5078810 --game-date 2026-10-24   # one QB, one game
 python -m scripts.backtest           # score the models against stored real lines
+python -m scripts.weekly_report      # update reports/ with newly graded games
+python -m scripts.line_model         # test models that use the sportsbook line as an input
+python -m scripts.compare_features   # stats-only vs stats + market features, same games and split
 python scripts/xgboost_reg.py        # XGBoost analysis: baselines, feature importance
 python scripts/xgboost_reg_tune.py   # re-tune XGBoost (Optuna, ~3 min) -> configs/
 ```
 
 Trained models aren't in git, so run `scripts.train` first after cloning.
 Every model uses the same real, pregame-only features from
-`scripts/xgboost_reg.py`; nothing in them is made up or a placeholder.
+`scripts/xgboost_reg.py`; nothing in them is made up or a placeholder. That
+includes three market features from CFBD game lines (the `game_lines` table,
+refreshed by every ingestion run): the game's over/under, the team's spread,
+and the points the market expects the team to score.
 
 ## 10. Test ingestion (local database only)
 
@@ -217,6 +223,13 @@ To move the job to another Mac (only one machine should ever have it):
 `scripts/install_snapshot_schedule.sh --remove` on the old one, then
 `scripts/install_snapshot_schedule.sh` on the new one. If the Mac is asleep
 at 9am Friday, the job runs when it wakes.
+
+**Weekly results:** after pulling last weekend's results, the job grades the
+models' picks into `reports/weekly_results.md` (week-by-week record, units,
+and how close the models were vs. the sportsbook line), with every pick in
+`reports/graded_picks.csv`. Graded games are only ever added, never
+rewritten, so retraining later can't change past weeks. Commit the two files
+to share the latest week, or run `python -m scripts.weekly_report` yourself.
 
 `scripts/backtest.py` scores the models against each book's last line before
 kickoff, at the real prices. It reports "no QB games" until lines have been

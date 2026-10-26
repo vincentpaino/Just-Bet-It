@@ -223,6 +223,44 @@ def validate_and_format(raw_games):
 
 
 # ---------------------------------------------------------------------------
+# Game lines (spreads / over-unders from several sportsbooks)
+# ---------------------------------------------------------------------------
+
+def fetch_game_lines(year):
+    """
+    Fetch CFBD game lines for a season, one record per game per sportsbook.
+    A year-only request returns the regular season, so postseason is fetched
+    separately. spread is from the home team's side (negative = home favored).
+    """
+
+    games = []
+    with _get_api_client() as api_client:
+        betting_api = cfbd.BettingApi(api_client)
+        for season_type in ("regular", "postseason"):
+            games.extend(betting_api.get_lines(year=year, season_type=season_type))
+
+    records = []
+    for game in games:
+        data = game.to_dict()
+        if data.get("id") is None:
+            continue
+        for line in data.get("lines") or []:
+            if not line.get("provider"):
+                continue
+            records.append({
+                "cfbd_game_id": int(data["id"]),
+                "provider": line["provider"],
+                "spread": _clean(line.get("spread")),
+                "spread_open": _clean(line.get("spreadOpen")),
+                "over_under": _clean(line.get("overUnder")),
+                "over_under_open": _clean(line.get("overUnderOpen")),
+                "home_moneyline": _clean(line.get("homeMoneyline")),
+                "away_moneyline": _clean(line.get("awayMoneyline")),
+            })
+    return records
+
+
+# ---------------------------------------------------------------------------
 # Quarterbacks
 # ---------------------------------------------------------------------------
 

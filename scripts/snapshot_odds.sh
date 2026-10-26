@@ -10,7 +10,9 @@
 # so running it twice by accident costs nothing extra, and a run never takes
 # remaining credits below 50.
 #
-# Afterwards it backs up the database to data/raw/backups/ (last 8 kept).
+# Then it grades the previous weekend's picks into reports/weekly_results.md
+# (see scripts/weekly_report.py) and backs up the database to
+# data/raw/backups/ (last 8 kept).
 #
 # Extra arguments are passed to run_ingestion and override the defaults
 # below, e.g. a cheaper test run:  scripts/snapshot_odds.sh --props-window-hours 24
@@ -51,5 +53,7 @@ PY
     wait_for_network
     # caffeinate keeps the Mac from going back to sleep until the job finishes
     /usr/bin/caffeinate -i "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
+    # Grade last weekend's picks into reports/ (a failure here shouldn't skip the backup)
+    /usr/bin/caffeinate -i "$PY" -m scripts.weekly_report || echo "[report] FAILED; job continues"
     /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1

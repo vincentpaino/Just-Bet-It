@@ -78,7 +78,7 @@ def prior_mean(df, keys, col, window, min_periods=1):
     )
 
 
-FEATURES = [
+STATS_FEATURES = [
     "games_played_prior",
     "avg_pass_yds_last3", "avg_pass_yds_last5", "avg_pass_yds_season",
     "pass_yds_std_last5",
@@ -90,8 +90,35 @@ FEATURES = [
     "yds_trend", "exp_yards", "att_share",
 ]
 
+# What the betting market expects for the game (CFBD consensus closing lines,
+# set before kickoff). Books price in things the stats can't see: injuries,
+# game plans, run-heavy offenses.
+MARKET_FEATURES = [
+    "game_total",        # over/under: expected combined points
+    "team_spread",       # from the QB's team's side (negative = favored)
+    "implied_team_pts",  # points the market expects his offense to score
+]
 
-def build_features(raw: pd.DataFrame) -> pd.DataFrame:
+FEATURES = STATS_FEATURES + MARKET_FEATURES
+
+
+def load_game_lines() -> pd.DataFrame:
+    """Consensus (median across sportsbooks) home spread and over/under per game."""
+    return pd.read_sql(
+        """
+        SELECT game_id,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY spread)     AS home_spread,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY over_under) AS game_total
+        FROM game_lines
+        GROUP BY game_id
+        """,
+        engine,
+    )
+
+
+def build_features(raw: pd.DataFrame, lines: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Pregame features for every QB game in `raw`. `lines` defaults to the
+    consensus game lines from the database (see load_game_lines)."""
     # Rows flagged is_upcoming are games to predict: their stats are unknown
     # (blank), and every feature below only looks at earlier games anyway.
     df = raw.copy()
@@ -166,6 +193,14 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
         left_on=["game_id", "opponent_team_id"],
         right_on=["game_id", "defense_id"], how="left",
     ).drop(columns=["defense_id"])
+
+    # Market expectations for the game, from the QB's team's side
+    if lines is None:
+        lines = load_game_lines()
+    qb = qb.merge(lines[["game_id", "home_spread", "game_total"]], on="game_id", how="left")
+    qb["team_spread"] = np.where(qb["is_home"] == 0, -qb["home_spread"], qb["home_spread"])
+    qb.loc[qb["is_home"].isna(), "team_spread"] = np.nan
+    qb["implied_team_pts"] = qb["game_total"] / 2 - qb["team_spread"] / 2
 
     # Engineered combinations
     qb["yds_trend"] = qb["avg_pass_yds_last3"] - qb["avg_pass_yds_season"]

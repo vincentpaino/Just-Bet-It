@@ -202,4 +202,25 @@ CREATE TABLE IF NOT EXISTS qb_prop_lines (
 
 CREATE INDEX IF NOT EXISTS idx_qb_props_game ON qb_prop_lines (game_id);
 
+-- ---------------------------------------------------------------------------
+-- GAME LINES  (CFBD historical/current game lines: one row per game per book)
+-- spread is from the HOME team's side (negative = home favored). Rows are
+-- updated as books move the line, so after kickoff they hold the closing line.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS game_lines (
+    id               SERIAL PRIMARY KEY,
+    game_id          INTEGER NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+    provider         VARCHAR(100) NOT NULL,
+    spread           NUMERIC(5,1),
+    spread_open      NUMERIC(5,1),
+    over_under       NUMERIC(5,1),
+    over_under_open  NUMERIC(5,1),
+    home_moneyline   NUMERIC(8,2),
+    away_moneyline   NUMERIC(8,2),
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_game_line_provider UNIQUE (game_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_lines_game ON game_lines (game_id);
+
 COMMIT;

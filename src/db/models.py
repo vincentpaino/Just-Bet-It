@@ -456,3 +456,44 @@ class QBPropLine(Base):
         "Game",
         back_populates="qb_prop_lines",
     )
+
+
+class GameLine(Base):
+    """
+    CFBD game line from one sportsbook. spread is from the home team's side
+    (negative = home favored); rows are updated until kickoff, so they end
+    up holding the closing line.
+    """
+    __tablename__ = "game_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_id",
+            "provider",
+            name="uq_game_line_provider",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    game_id = Column(
+        Integer,
+        ForeignKey(
+            "games.game_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    provider = Column(String(100), nullable=False)
+
+    spread = Column(Numeric(5, 1))
+    spread_open = Column(Numeric(5, 1))
+    over_under = Column(Numeric(5, 1))
+    over_under_open = Column(Numeric(5, 1))
+    home_moneyline = Column(Numeric(8, 2))
+    away_moneyline = Column(Numeric(8, 2))
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )

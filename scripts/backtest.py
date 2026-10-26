@@ -138,6 +138,29 @@ def simulate_betting_strategy(predictions, bets, edge_threshold=0.0):
     }
 
 
+def load_graded_games(bundle):
+    """
+    QB games with a stored pregame line and a final result, with pregame
+    features from the same code the models were trained with. Returns
+    (graded, scoreable): all such games, and only those after the models'
+    training cutoff (the only ones it's fair to score them on).
+    """
+    session = SessionLocal()
+    try:
+        lines = load_closing_prop_lines(session)
+    finally:
+        session.close()
+
+    qb = build_features(load_qb_games())
+    qb = qb[has_history(qb)]
+    if lines.empty:
+        return qb.iloc[0:0], qb.iloc[0:0]
+
+    graded = qb.merge(lines, on=["game_id", "player_id"], how="inner")
+    after = graded["game_date"] > pd.Timestamp(bundle["train_end"])
+    return graded, graded[after].reset_index(drop=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Backtest QB passing-yards models against stored pregame lines")
     parser.add_argument("--edge-threshold", type=float, default=0.0,
@@ -154,32 +177,16 @@ def main():
     train_end = pd.Timestamp(bundle["train_end"])
     print(f"Loaded {len(bundle['models'])} models (trained through {train_end.date()})")
 
-    session = SessionLocal()
-    try:
-        lines = load_closing_prop_lines(session)
-    finally:
-        session.close()
+    graded, bets = load_graded_games(bundle)
 
-    # Pregame features for every played QB game (same code as training)
-    qb = build_features(load_qb_games())
-    qb = qb[has_history(qb)]
-
-    bets = (
-        qb.merge(lines, on=["game_id", "player_id"], how="inner")
-        if not lines.empty else qb.iloc[0:0]
-    )
-
-    if bets.empty:
+    if graded.empty:
         print("\nNo QB games have both a stored pregame prop line and a final stat line yet.")
         print("Lines are captured by the weekly job (scripts/snapshot_odds.sh); results")
         print("appear once CFBD QB stats for those games are ingested.")
         return 0
 
-    # Never score games the models trained on
-    after = bets["game_date"] > train_end
-    print(f"\n{len(bets)} QB games with a pregame line and a result; "
-          f"{after.sum()} are after the training cutoff")
-    bets = bets[after].reset_index(drop=True)
+    print(f"\n{len(graded)} QB games with a pregame line and a result; "
+          f"{len(bets)} are after the training cutoff")
 
     if bets.empty:
         print("None are after the training cutoff yet; more weeks of lines will fix this.")

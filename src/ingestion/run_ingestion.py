@@ -4,7 +4,7 @@ Mirrors the ingest_data() pseudocode from Doc II Section 3.3 / Doc III
 Section 4.3 — pulls odds, pulls historical stats, logs the run.
 
 Usage:
-    python -m src.ingestion.run_ingestion --year 2026          # CFBD games + QB stats
+    python -m src.ingestion.run_ingestion --year 2026          # CFBD games, game lines, QB stats
     python -m src.ingestion.run_ingestion --props               # ...plus QB prop lines
     python -m src.ingestion.run_ingestion --odds --skip-stats --skip-qb   # game odds only
 
@@ -29,7 +29,10 @@ from sqlalchemy import and_, or_
 
 load_dotenv()
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from src.db.models import (
+    GameLine,
     IngestionLog,
     Team,
     Odds,
@@ -58,6 +61,7 @@ from .team_names import (
 )
 
 from .cfbd_ingest import (
+    fetch_game_lines,
     fetch_teams,
     fetch_team_season_stats,
     fetch_qb_season_stats,
@@ -547,6 +551,49 @@ def ingest_team_stats(session, year: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Game lines (CFBD spreads / over-unders)
+# ---------------------------------------------------------------------------
+
+def ingest_game_lines(session, year: int) -> int:
+    """
+    Store CFBD game lines (one row per game per sportsbook). Lines attach to
+    games by CFBD game ID, so team/game stats must be ingested first. Existing
+    rows are updated, so re-running before kickoff keeps the latest line and
+    afterwards the closing line.
+    """
+
+    records = fetch_game_lines(year)
+
+    game_ids = dict(
+        session.query(Game.cfbd_game_id, Game.game_id)
+        .filter(Game.cfbd_game_id.is_not(None))
+    )
+
+    rows = []
+    for record in records:
+        game_id = game_ids.get(record.pop("cfbd_game_id"))
+        if game_id is not None:            # e.g. FCS-only games we don't track
+            rows.append({"game_id": game_id, **record, "updated_at": _utcnow()})
+
+    if rows:
+        statement = pg_insert(GameLine.__table__).values(rows)
+        statement = statement.on_conflict_do_update(
+            constraint="uq_game_line_provider",
+            set_={column: statement.excluded[column] for column in (
+                "spread", "spread_open", "over_under", "over_under_open",
+                "home_moneyline", "away_moneyline", "updated_at",
+            )},
+        )
+        session.execute(statement)
+    session.commit()
+
+    print(f"[cfbd_lines] {year}: {len(rows)} lines for "
+          f"{len({r['game_id'] for r in rows})} games "
+          f"({len(records) - len(rows)} skipped: game not tracked)")
+    return len(rows)
+
+
+# ---------------------------------------------------------------------------
 # Quarterbacks
 # ---------------------------------------------------------------------------
 
@@ -785,6 +832,12 @@ def main():
     )
 
     parser.add_argument(
+        "--skip-lines",
+        action="store_true",
+        help="Skip CFBD game lines (spreads / over-unders).",
+    )
+
+    parser.add_argument(
         "--skip-qb",
         action="store_true",
         help="Skip QB stats ingestion.",
@@ -833,6 +886,12 @@ def main():
             _run_step(
                 session, "cfbd_stats", "cfbd_stats",
                 ingest_team_stats, args.year,
+            )
+
+        if not args.skip_lines:
+            _run_step(
+                session, "cfbd_lines", "cfbd_lines",
+                ingest_game_lines, args.year,
             )
 
         if not args.skip_qb:
