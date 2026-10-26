@@ -49,6 +49,39 @@ experiment ladder, so any of it can be re-tested as more prop-line games
 come in. The team box scores already loaded (2022 to now) are still in the
 shared database's `team_game_stats` table.
 
+## Round 2: tested, not adopted (October 2026)
+
+Adoption rule, set before running: better than production in at least 95%
+of resamples without making the ensemble worse.
+
+| Change | XGBoost test MAE | RMSE | Resamples better | Verdict |
+|---|---|---|---|---|
+| Production (for reference) | 62.52 | 77.21 | — | |
+| + opponent-adjusted pass defense (yards and yards/attempt allowed vs. what those offenses usually throw) | 62.49 | 77.21 | 69.8% | tie |
+| + line movement (over/under and spread, open to close) | 62.60 | 77.31 | 24.3% | slightly worse |
+| + both | 62.60 | 77.32 | 25.9% | slightly worse |
+
+**Opponent-adjusted defense** fixes a real flaw in the defense feature we
+use (raw yards allowed ignores who the defense played), but the closing
+spread and total already price in defense quality, so it adds almost nothing.
+
+**Line movement** clearly carries information on its own: QBs averaged 201
+yards when the total dropped 4+ points before kickoff, 249 when it rose 4+,
+and 217 otherwise. But the model already sees the closing total, which
+includes the move, so knowing where the line started adds nothing.
+
+Code: `experiments/model-ideas` branch, commit `9b43630`
+(`python -m scripts.compare_features --candidates`).
+
+## What the experiments say overall
+
+Only new information has helped (the market features). Re-measuring the same
+stats (median target, per-attempt and adjusted defense, pass rate, pace,
+prior season, line movement) hasn't, because the QB's recent stats and the
+closing betting lines already contain it. The next real gains would come
+from information neither has: injuries, weather (CFBD paid tier), or more
+prop-line history to train on.
+
 ## Still the open question
 
 None of these changes beat the sportsbook line on the 57 graded prop-line
