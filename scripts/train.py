@@ -106,6 +106,9 @@ def main():
 
     print(f"\n{'model':20} {'MAE':>7} {'RMSE':>7} {'R²':>7}   (test set, passing yards)")
     rows = predict_all(models, X_test)
+    # Held-out misses (actual - predicted), saved so src/betting/probability.py
+    # can turn a prediction into P(over the line) from the model's real errors
+    residuals = {name: (y_test.to_numpy(dtype=float) - pred) for name, pred in rows.items()}
     rows["baseline: last-5 avg"] = X_test["avg_pass_yds_last5"].to_numpy()
     rows["baseline: train mean"] = np.full(len(y_test), y_train.mean())
     for name, pred in rows.items():
@@ -118,6 +121,7 @@ def main():
         "features": FEATURES,
         "train_end": cutoff,   # backtest.py only scores games after this
         "xgb_params": xgb_params,
+        "residuals": residuals,  # per model, on the test set (newest 20%)
         "trained_at": datetime.now(),
     }, MODELS_PATH)
     print(f"\nSaved {len(models)} models to {MODELS_PATH.relative_to(PROJECT_ROOT)} "

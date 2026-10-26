@@ -17,6 +17,9 @@ optuna # used for automated hyperparameter search/optimization
 sportsipy
 requests
 cfbd
+# --- Dashboard (streamlit run app.py) ---
+streamlit>=1.50
+
 # --- Testing ---
 pytest
 
