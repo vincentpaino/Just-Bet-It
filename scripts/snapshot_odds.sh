@@ -11,8 +11,9 @@
 # remaining credits below 50.
 #
 # Then it grades the previous weekend's picks into reports/weekly_results.md
-# (see scripts/weekly_report.py) and backs up the database to
-# data/raw/backups/ (last 8 kept).
+# (see scripts/weekly_report.py), retrains the models on all games so far
+# (graded first, so each week is graded by the model that made its picks),
+# and backs up the database to data/raw/backups/ (last 8 kept).
 #
 # Extra arguments are passed to run_ingestion and override the defaults
 # below, e.g. a cheaper test run:  scripts/snapshot_odds.sh --props-window-hours 24
@@ -55,5 +56,9 @@ PY
     /usr/bin/caffeinate -i "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
     # Grade last weekend's picks into reports/ (a failure here shouldn't skip the backup)
     /usr/bin/caffeinate -i "$PY" -m scripts.weekly_report || echo "[report] FAILED; job continues"
+    # THEN retrain on everything, including last weekend (order matters: grading
+    # first means each week is graded by the model that made its picks).
+    # If training fails, the previous models stay in place.
+    /usr/bin/caffeinate -i "$PY" -m scripts.train || echo "[train] FAILED; keeping previous models"
     /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1

@@ -15,6 +15,7 @@ that produced these numbers is `python -m scripts.compare_features` on the
 |---|---|---|---|---|
 | Stats only (17 features) | 63.80 | 79.57 | — | starting point |
 | **+ market features** (CFBD game total, team spread, implied team points) | **62.52** | **77.21** | **99.8%** | biggest gain since fixing leakage; in production |
+| **Weekly refitting on all games** (walk-forward) | 62.42 | 77.16 | 86.4% | adopted as standard practice on 2026-10-27 even though it missed the 95% bar: a small, consistent gain (ensemble 94%, neural net 100%) that's very unlikely to hurt. See round 3. |
 
 ## Tested, not adopted (October 2026)
 
@@ -91,8 +92,12 @@ on every game played so far, vs. the fixed model trained through 2025-11-15:
 
 A small, consistent gain (and a clear one for the neural net), but the primary
 model didn't clear the bar; on the 57 prop-line games refit went 24-33 vs
-25-32. Worth re-testing later in the season, when there are more 2026 games
-for refitting to learn from.
+25-32. **Decision:** the team chose to adopt it anyway as standard practice
+(it's very unlikely to hurt), knowing the gain is about 0.1 yards. Since
+2026-10-27, `scripts/train.py` evaluates on the held-out split, then refits
+on all games for live predictions, and the Friday job grades last weekend's
+picks before retraining, so each week is still graded by the model that made
+its picks.
 
 **Stale lines (no model).** When one book's line is 5+ yards off the median of
 the other books (games with 3+ books), bet toward the consensus at that book's

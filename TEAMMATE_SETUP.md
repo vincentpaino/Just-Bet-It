@@ -153,7 +153,7 @@ You should get a count in the thousands. If you're on the shared database,
 you're done with setup. The model scripts, in order:
 
 ```bash
-python -m scripts.train              # train all 4 models + ensemble -> models/qb_models.pkl (~10s)
+python -m scripts.train              # score on held-out games, then refit all 4 models on every game (~20s)
 python -m scripts.predict_upcoming   # predictions vs. sportsbook lines for upcoming games
 python -m scripts.predict --qb-id 5078810 --game-date 2026-10-24   # one QB, one game
 python -m scripts.backtest           # score the models against stored real lines
@@ -165,6 +165,10 @@ python scripts/xgboost_reg_tune.py   # re-tune XGBoost (Optuna, ~3 min) -> confi
 ```
 
 Trained models aren't in git, so run `scripts.train` first after cloning.
+The saved models are refit on every game played so far, so `scripts.backtest`
+and the dashboard's backtest only score games played after the last
+training run (the Friday job grades the weekend first, then retrains). To
+backtest older graded games, use `python -m scripts.train --holdout-only`.
 Every model uses the same real, pregame-only features from
 `scripts/xgboost_reg.py`; nothing in them is made up or a placeholder. That
 includes three market features from CFBD game lines (the `game_lines` table,

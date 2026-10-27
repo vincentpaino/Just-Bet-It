@@ -18,12 +18,27 @@ few missing values (a QB's first game of a season, a defense with < 2 prior
 games) are filled with the training median, plus a column flagging that the
 value was missing. XGBoost handles blanks itself.
 
-Saves models/qb_models.pkl, used by backtest.py, predict.py and
-predict_upcoming.py. Run from the project root:
+Two steps:
+  1. Evaluate: train on older games, score on the newest 20% (the numbers
+     printed), and keep those held-out misses for the betting probabilities.
+  2. Refit on ALL games and save that version for live predictions, so the
+     models know this season's games (walk-forward testing showed a small,
+     consistent gain; see reports/model_experiments.md).
 
-    python -m scripts.train
+Because the saved models have seen every game up to today, backtest.py and
+the weekly report only score games played after this run. The Friday job
+grades last weekend's picks BEFORE retraining, so each week is graded by the
+model that made the picks.
+
+Saves models/qb_models.pkl, used by backtest.py, predict.py,
+predict_upcoming.py and the dashboard. Run from the project root:
+
+    python -m scripts.train                  # evaluate, then refit on all games
+    python -m scripts.train --holdout-only   # save the evaluation models instead
+                                             # (to backtest past graded games)
 """
 
+import argparse
 import sys
 from datetime import datetime
 
@@ -85,6 +100,11 @@ def load_models(path=MODELS_PATH):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Train and save the QB passing-yards models")
+    parser.add_argument("--holdout-only", action="store_true",
+                        help="Save the models trained before the test split instead of refitting on all games")
+    args = parser.parse_args()
+
     print("Training QB passing-yards models")
     print("-" * 60)
 
@@ -115,17 +135,29 @@ def main():
         print(f"{name:20} {mean_absolute_error(y_test, pred):7.2f} "
               f"{root_mean_squared_error(y_test, pred):7.2f} {r2_score(y_test, pred):7.3f}")
 
+    # Step 2: refit on every game for live predictions (unless --holdout-only)
+    train_end = cutoff
+    if not args.holdout_only:
+        print(f"\nRefitting on all {len(data):,} games for live predictions...")
+        models = build_models(xgb_params)
+        for model in models.values():
+            model.fit(data[FEATURES], data["passing_yards"])
+        train_end = data["game_date"].max()
+
     MODELS_PATH.parent.mkdir(exist_ok=True)
     joblib.dump({
         "models": models,
         "features": FEATURES,
-        "train_end": cutoff,   # backtest.py only scores games after this
+        "train_end": train_end,   # backtest/weekly report only score games after this
+        "eval_cutoff": cutoff,    # where the evaluation split was
+        "refit_on_all": not args.holdout_only,
         "xgb_params": xgb_params,
-        "residuals": residuals,  # per model, on the test set (newest 20%)
+        "residuals": residuals,  # per model, held-out misses from the evaluation step
         "trained_at": datetime.now(),
     }, MODELS_PATH)
     print(f"\nSaved {len(models)} models to {MODELS_PATH.relative_to(PROJECT_ROOT)} "
-          f"(trained through {cutoff.date()})")
+          f"(trained through {train_end.date()}"
+          f"{'; evaluation models only' if args.holdout_only else ''})")
     return 0
 
 
