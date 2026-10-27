@@ -73,6 +73,40 @@ includes the move, so knowing where the line started adds nothing.
 Code: `experiments/model-ideas` branch, commit `9b43630`
 (`python -m scripts.compare_features --candidates`).
 
+## Round 3: tested, not adopted (October 27, 2026)
+
+Rules set before running: weekly refitting needed XGBoost better in >= 95% of
+resamples (ensemble not worse); the stale-line strategy needed a win rate
+above 52.4% with a one-sided binomial p < 0.05 and positive units.
+
+**Weekly refitting (walk-forward).** Before each of the 13 test weeks, retrain
+on every game played so far, vs. the fixed model trained through 2025-11-15:
+
+| Model | MAE fixed | MAE refit | Refit better in |
+|---|---|---|---|
+| XGBoost | 62.52 | 62.42 | 86.4% (below 95%) |
+| Ensemble | 62.65 | 62.49 | 94.0% |
+| Neural net | 64.60 | 63.72 | 100% |
+| Random forest | 62.44 | 62.53 | 29.9% |
+
+A small, consistent gain (and a clear one for the neural net), but the primary
+model didn't clear the bar; on the 57 prop-line games refit went 24-33 vs
+25-32. Worth re-testing later in the season, when there are more 2026 games
+for refitting to learn from.
+
+**Stale lines (no model).** When one book's line is 5+ yards off the median of
+the other books (games with 3+ books), bet toward the consensus at that book's
+price: **15 bets, 6-9 (40%), -3.83 units, p = 0.889.** Fails. Exploratory
+thresholds (not pre-registered, so not counted): 2.5+ yard gap 23-14, +5.95
+units, p = 0.153; 10+ yards 3-1. Most outliers were BetOnline posting a
+*higher* line, and betting against it mostly lost; BetOnline is generally one
+of the sharper books, so its "outlier" lines may have been the right ones. The
+sharpest books (Pinnacle, Circa) aren't in our data. Games where the QB didn't
+play (no stats) are excluded, since books void those bets.
+
+Code: `experiments/model-ideas` branch, commit `c43f641`
+(`python -m scripts.walk_forward`, `python -m scripts.stale_lines`).
+
 ## What the experiments say overall
 
 Only new information has helped (the market features). Re-measuring the same
