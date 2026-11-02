@@ -248,6 +248,26 @@ Neon's free plan can only restore to a point in the last 6 hours, so the
 weekly backups are the real safety net. To make one by hand:
 `python -m scripts.backup_db`.
 
+## 13. Backfilling historical prop lines (one-time, Odds API paid plan)
+
+`scripts/backfill_props.py` fetches each past game's QB passing-yards props as
+they were about 1 hour before kickoff (10 credits per game with props; free
+if none were posted; 1 credit per game day to list events) and stores them in
+`qb_prop_lines` with their real historical timestamps. Newest games first, so
+if credits run short it's the oldest that get skipped.
+
+```bash
+python -m scripts.backfill_props --estimate --start 2024-08-01 --end 2026-11-02   # free
+python -m scripts.backfill_props --start 2025-10-11 --end 2025-10-11 --budget 400  # pilot day
+python -m scripts.backfill_props --start 2024-08-01 --end 2026-11-02 --budget 19000
+```
+
+`--budget` is a hard cap. Progress is saved per day in
+`data/raw/backfill_progress.json` (gitignored), and games that already have a
+snapshot shortly before kickoff are skipped, so re-running never pays twice.
+Estimate for 2024 to now: about 16,000 credits (max ~25,000), which fits the
+$30 plan's 20,000.
+
 ## Common gotchas we already hit (save yourself the time)
 
 - **`ModuleNotFoundError: No module named 'src'`** — you're running the

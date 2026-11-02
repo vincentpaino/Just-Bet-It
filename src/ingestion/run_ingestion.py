@@ -318,19 +318,38 @@ def _player_key(name: str) -> str:
     return normalize(_NAME_SUFFIXES.sub("", name or ""))
 
 
-def _qb_ids_by_name(session, team_ids) -> dict[str, int]:
-    """{player name key: CFBD player_id} for QBs who have played for these teams."""
+def _last_name_key(name: str) -> str:
+    parts = _NAME_SUFFIXES.sub("", name or "").split()
+    return normalize(parts[-1]) if parts else ""
 
-    rows = (
-        session.query(QBGameStat.player_name, QBGameStat.player_id)
-        .filter(QBGameStat.team_id.in_(team_ids))
-        .order_by(QBGameStat.game_date.desc())
-    )
 
-    ids = {}
-    for name, player_id in rows:
-        ids.setdefault(_player_key(name), player_id)  # most recent wins
-    return ids
+class _QBMatcher:
+    """
+    Matches sportsbook player names to CFBD player IDs among the QBs who have
+    played for the given teams: exact name first, then last name, but only
+    when exactly one of those QBs has it (catches nicknames such as
+    "Tommy" for "Thomas"; two QBs with the same last name stay unmatched).
+    """
+
+    def __init__(self, session=None, team_ids=None, rows=None):
+        # rows: (player_name, player_id) pairs, most recent first; queried if not given
+        if rows is None:
+            rows = (
+                session.query(QBGameStat.player_name, QBGameStat.player_id)
+                .filter(QBGameStat.team_id.in_(team_ids))
+                .order_by(QBGameStat.game_date.desc())
+            )
+        self.by_name, self.by_last = {}, {}
+        for name, player_id in rows:
+            self.by_name.setdefault(_player_key(name), player_id)  # most recent wins
+            self.by_last.setdefault(_last_name_key(name), set()).add(player_id)
+
+    def __call__(self, name: str):
+        player_id = self.by_name.get(_player_key(name))
+        if player_id is not None:
+            return player_id
+        candidates = self.by_last.get(_last_name_key(name), set())
+        return next(iter(candidates)) if len(candidates) == 1 else None
 
 
 def ingest_qb_props(
@@ -414,10 +433,10 @@ def ingest_qb_props(
             session.commit()  # keep any placeholder game created above
             continue
 
-        qb_ids = _qb_ids_by_name(session, [home_team.team_id, away_team.team_id])
+        match_qb = _QBMatcher(session, [home_team.team_id, away_team.team_id])
 
         for record in records:
-            player_id = qb_ids.get(_player_key(record["player_name"]))
+            player_id = match_qb(record["player_name"])
             unmatched_players += player_id is None
 
             session.add(

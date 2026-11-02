@@ -6,6 +6,7 @@ from Doc II, Figure 3.1.
 Docs: https://the-odds-api.com/liveapi/guides/v4/
 """
 import os
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -15,23 +16,44 @@ ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 SPORT_KEY = "americanfootball_ncaaf"
 
 
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+RETRY_WAITS = [5, 15, 45]     # seconds before retries 1-3
+
+
 class OddsAPIError(Exception):
     pass
 
 
-def _api_get(path: str, **params) -> requests.Response:
-    """GET an Odds API endpoint under /sports/<SPORT_KEY>, raising on failure."""
+def _api_get(path: str, historical: bool = False, **params) -> requests.Response:
+    """GET an Odds API endpoint under /sports/<SPORT_KEY> (or /historical/sports/...),
+    raising on failure."""
     api_key = os.environ.get("ODDS_API_KEY")
     if not api_key:
         raise OddsAPIError("ODDS_API_KEY is not set in the environment")
 
-    url = f"{ODDS_API_BASE_URL}/sports/{SPORT_KEY}/{path}"
-    response = requests.get(url, params={"apiKey": api_key, **params}, timeout=15)
-    if response.status_code != 200:
-        raise OddsAPIError(
-            f"Odds API request failed ({response.status_code}): {response.text}"
-        )
-    return response
+    prefix = "historical/sports" if historical else "sports"
+    url = f"{ODDS_API_BASE_URL}/{prefix}/{SPORT_KEY}/{path}"
+
+    # Temporary failures (their server errors, rate limits, network blips) are
+    # retried with growing waits; anything else (bad key, plan refusal) isn't.
+    for attempt, wait in enumerate(RETRY_WAITS + [None], start=1):
+        try:
+            response = requests.get(url, params={"apiKey": api_key, **params}, timeout=15)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            problem, response = f"{type(exc).__name__}", None
+        else:
+            if response.status_code == 200:
+                return response
+            problem = f"{response.status_code}"
+            if response.status_code not in RETRY_STATUSES:
+                break
+        if wait is None:
+            break
+        print(f"[odds_api] {path}: temporary error ({problem}), retry {attempt} in {wait}s")
+        time.sleep(wait)
+
+    detail = response.text if response is not None else problem
+    raise OddsAPIError(f"Odds API request failed ({problem}): {detail}")
 
 
 def fetch_odds(
@@ -235,3 +257,47 @@ def validate_and_format_props(event: dict[str, Any]) -> list[dict[str, Any]]:
         main_lines.setdefault((row["sportsbook"], row["player_name"]), row)
 
     return list(main_lines.values())
+
+
+# ---------------------------------------------------------------------------
+# Historical (paid plans only): lines as they were at a past moment
+# ---------------------------------------------------------------------------
+
+def credits_used_last(response: requests.Response) -> Optional[int]:
+    """Credits the last request cost, from the quota header (None if absent)."""
+    try:
+        return int(float(response.headers.get("x-requests-last")))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_historical_events(date_iso: str) -> tuple[list[dict[str, Any]], Optional[int], Optional[int]]:
+    """
+    Events listed as of `date_iso` (the closest snapshot at or before it),
+    plus credits remaining and credits this call cost. Costs 1 credit (0 if
+    no events). Paid plans only.
+    """
+    response = _api_get("events", historical=True, date=date_iso)
+    return response.json().get("data") or [], _remaining_credits(response), credits_used_last(response)
+
+
+def fetch_historical_event_props(
+    event_id: str,
+    date_iso: str,
+    regions: str = "us",
+    markets: str = "player_pass_yds",
+    odds_format: str = "american",
+) -> tuple[dict[str, Any], Optional[str], Optional[int], Optional[int]]:
+    """
+    One event's player prop odds as of `date_iso`: (event data, the snapshot's
+    actual timestamp, credits remaining, credits this call cost). Costs 10 per
+    market returned per region; 0 if no odds. Paid plans only.
+    """
+    response = _api_get(
+        f"events/{event_id}/odds", historical=True,
+        regions=regions, markets=markets, oddsFormat=odds_format, date=date_iso,
+    )
+    body = response.json()
+    return (body.get("data") or {}, body.get("timestamp"),
+            _remaining_credits(response), credits_used_last(response))
+
