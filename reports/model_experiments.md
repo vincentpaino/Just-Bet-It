@@ -112,6 +112,43 @@ play (no stats) are excluded, since books void those bets.
 Code: `experiments/model-ideas` branch, commit `c43f641`
 (`python -m scripts.walk_forward`, `python -m scripts.stale_lines`).
 
+## The real test: vs. 2,262 closing lines (November 2, 2026)
+
+After backfilling historical props (2024-08 to 2026-10), every graded game
+with a closing line was predicted **out of sample** by walking forward:
+before each of 41 weeks, all four models were retrained on every game played
+before it. Rules set before running: a strategy "beats the books" only if it
+wins more than 52.4% with a one-sided binomial p < 0.05 and positive units,
+at each book's real closing price.
+
+**Accuracy:** the closing line misses by 60.6 yards on average; XGBoost by
+61.3, the ensemble by 61.4. The books are more accurate.
+
+| Strategy (all out of sample) | Bets | Record | Win % | Units | p | Verdict |
+|---|---|---|---|---|---|---|
+| XGBoost side, every game | 2,262 | 1170-1092 | 51.7% | -68.6 | 0.747 | fail |
+| Ensemble side, every game | 2,262 | 1187-1075 | 52.5% | -37.2 | 0.480 | fail |
+| **Confident picks** (rule registered 2026-10-26: 15+ yds from the line and all 4 models agree) | 794 | 435-359 | **54.8%** | **+21.7** | 0.095 | fail (closest) |
+| Line-aware ridge, trained 2024-25, tested on 2026 | 602 | 299-303 | 49.7% | -41.1 | 0.917 | fail |
+| Blend (line + 40% of the model's disagreement), tested on 2026 | 602 | 303-299 | 50.3% | -33.3 | 0.855 | fail |
+
+Descriptive only (not used to decide): the further XGBoost is from the line,
+the better its picks do (0-5 yds 47.3%, 5-10 51.8%, 10-20 51.1%, 20+ 56.2%).
+Confident picks by season: 2024 55.4% (+11.6 u), 2025 57.2% (+21.9 u), 2026
+50.0% (-11.8 u); unders 56.2% vs overs 53.3%.
+
+**Conclusion:** betting the model on every game loses to the closing line,
+and the line-aware versions don't fix that. The one encouraging result is
+the pre-registered confident-picks rule: profitable over two-plus seasons it
+was never fit to, but not significant (p = 0.095), and flat this season. It
+keeps being tracked live in `reports/weekly_results.md`, which is the right
+way to settle it. Note these are closing lines (about an hour before
+kickoff), the sharpest the books get; the earlier lines we actually bet on
+Fridays may be softer.
+
+Code: `experiments/model-ideas` branch, commit `ed8f564`
+(`python -m scripts.vs_closing_lines`).
+
 ## What the experiments say overall
 
 Only new information has helped (the market features). Re-measuring the same
@@ -123,6 +160,7 @@ prop-line history to train on.
 
 ## Still the open question
 
-None of these changes beat the sportsbook line on the 57 graded prop-line
-games so far (line MAE 54.9 vs ~58 for every model version). More weeks of
-prop lines, or a month of paid historical props, are what can answer that.
+With 2,262 closing lines, the answer for "bet the model on every game" is no.
+What's still open is whether the confident-picks rule has a real edge (54.8%
+so far, p = 0.095), and whether the Friday lines we actually bet on are softer
+than closing lines (closing-line value).
