@@ -146,8 +146,42 @@ way to settle it. Note these are closing lines (about an hour before
 kickoff), the sharpest the books get; the earlier lines we actually bet on
 Fridays may be softer.
 
-Code: `experiments/model-ideas` branch, commit `ed8f564`
-(`python -m scripts.vs_closing_lines`).
+Code: `python -m scripts.vs_closing_lines` (also on the experiments branch,
+commit `ed8f564`). It uses each book's last pregame line, so after the Friday
+backfill 3 games with only a Friday snapshot are included (2,265 games;
+confident picks 54.9%, p = 0.084); the conclusions are unchanged.
+
+## Closing-line value (November 2, 2026): PASSES
+
+We backfilled each game's lines as of the Friday 9:00am CT before it (what the
+weekly job captures live; Friday-night and Saturday games, 4,993 credits) to
+pair with the closing snapshots. Picks were made against the **Friday**
+consensus with the walk-forward predictions; CLV = how far the consensus moved
+toward the pick by close (yards). Rule set before fetching: confident picks
+pass if their mean CLV is above 0 with a one-sided p < 0.05.
+
+| Picks | Count | Mean CLV | Moved our way / against | p |
+|---|---|---|---|---|
+| **Confident picks** (pre-registered) | 277 | **+2.52 yds** | 49% / 23% | < 0.001 |
+| All picks | 825 | +1.43 yds | 42% / 26% | < 0.001 |
+| Confident, 2025 / 2026 | 105 / 167 | +1.94 / +2.96 | | 0.002 / < 0.001 |
+
+Checks: measured book by book (each book's own Friday vs. closing line) it's
+the same (+2.38 yds). No-skill rules on the same games show some drift toward
+the middle (toward a typical 226-yard line +0.41; toward the QB's last-5
+average +0.47, or +0.88 when 15+ yds off), but the model's confident picks get
+3-6 times more, so it isn't just lines reverting to average.
+
+**What it means:** the model has real information the Friday line doesn't,
+and the market moves toward it by kickoff. **But it isn't profitable yet:** at
+Friday prices the confident picks went 147-130 (53.1%), -1.84 units; an edge
+of ~2.5 yards is too small to beat the books' cut at -110 to -115. Ways to
+turn it into profit: bigger edges only, betting the best available price
+(line shopping), or betting earlier in the week when lines are softer.
+
+Code: `python -m scripts.clv` (needs the walk-forward cache from
+`scripts/vs_closing_lines.py` on the experiments branch);
+`scripts/backfill_props.py --snapshot friday9`.
 
 ## What the experiments say overall
 
@@ -161,6 +195,6 @@ prop-line history to train on.
 ## Still the open question
 
 With 2,262 closing lines, the answer for "bet the model on every game" is no.
-What's still open is whether the confident-picks rule has a real edge (54.8%
-so far, p = 0.095), and whether the Friday lines we actually bet on are softer
-than closing lines (closing-line value).
+Closing-line value says the confident picks have a real but small edge (+2.5
+yards, p < 0.001); the open question is how to make it profitable after the
+books' cut.

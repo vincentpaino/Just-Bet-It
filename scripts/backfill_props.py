@@ -11,6 +11,13 @@ fetched_at = the snapshot's real historical time, so everything that uses
 "each book's last pregame line" (backtest, line model, stale-line test)
 works on them unchanged.
 
+Two snapshot times (--snapshot):
+  closing   MINUTES_BEFORE minutes before each kickoff (default): the closing line
+  friday9   the Friday 9:00am CT before each game, what the weekly job captures
+            live; with the closing snapshot it measures closing-line value (CLV).
+            Like the live job, only games kicking off within 48h of that Friday
+            9am (Friday night and Saturday) are included.
+
 Safety:
   --estimate      costs nothing: counts our games and prints the cost range
   --budget N      hard cap on credits this run spends
@@ -23,11 +30,13 @@ Run from the project root:
     python -m scripts.backfill_props --estimate --start 2024-08-01 --end 2026-11-01
     python -m scripts.backfill_props --start 2024-09-07 --end 2024-09-07 --budget 400   # pilot
     python -m scripts.backfill_props --start 2024-08-01 --end 2026-11-01 --budget 19000
+    python -m scripts.backfill_props --snapshot friday9 --start 2025-08-01 --end 2026-11-01 --budget 5000
 """
 import argparse
 import json
 import sys
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import text
@@ -45,7 +54,9 @@ from src.ingestion.run_ingestion import _QBMatcher, _load_odds_name_map
 from src.ingestion.team_names import resolve_odds_team_name
 from scripts.xgboost_reg import PROJECT_ROOT
 
-PROGRESS_PATH = PROJECT_ROOT / "data" / "raw" / "backfill_progress.json"
+PROGRESS_PATH = PROJECT_ROOT / "data" / "raw" / "backfill_progress.json"            # closing
+FRIDAY_PROGRESS_PATH = PROJECT_ROOT / "data" / "raw" / "backfill_progress_friday9.json"
+CENTRAL = ZoneInfo("America/Chicago")
 MINUTES_BEFORE = 60          # snapshot this long before kickoff (~the closing line)
 EVENTS_COST, PROPS_COST = 1, 10
 PROPS_POSTED_SHARE = 0.65    # rough share of games with QB props (from this season's snapshots)
@@ -88,25 +99,37 @@ def estimate(games: pd.DataFrame):
           "props cost nothing, and the --budget cap stops the run before going over.")
 
 
-def already_captured(session, game_id: int, kickoff) -> bool:
-    """A snapshot from the 6 hours before kickoff already exists (live or backfilled)."""
-    k = pd.Timestamp(kickoff).tz_convert("UTC").tz_localize(None).to_pydatetime()
+def friday_9am_before(kickoff) -> pd.Timestamp:
+    """The latest Friday 9:00am Central at least an hour before kickoff (as UTC)."""
+    t = (pd.Timestamp(kickoff) - timedelta(hours=1)).tz_convert(CENTRAL)
+    friday = t.normalize() - timedelta(days=(t.weekday() - 4) % 7)
+    friday = friday.replace(hour=9)
+    if friday > t:                       # e.g. a Friday kickoff before 10am
+        friday -= timedelta(days=7)
+    return friday.tz_convert("UTC")
+
+
+def already_captured(session, game_id: int, start, end) -> bool:
+    """A snapshot for this game already exists between start and end (live or backfilled)."""
+    naive = lambda t: pd.Timestamp(t).tz_convert("UTC").tz_localize(None).to_pydatetime()
     return session.query(QBPropLine.id).filter(
         QBPropLine.game_id == game_id,
-        QBPropLine.fetched_at >= k - timedelta(hours=6),
-        QBPropLine.fetched_at < k,
+        QBPropLine.fetched_at >= naive(start),
+        QBPropLine.fetched_at < naive(end),
     ).first() is not None
 
 
-def load_progress() -> dict:
-    if PROGRESS_PATH.exists():
-        return json.loads(PROGRESS_PATH.read_text())
+def load_progress(path=None) -> dict:
+    path = path or PROGRESS_PATH
+    if path.exists():
+        return json.loads(path.read_text())
     return {"done_days": []}
 
 
-def save_progress(progress: dict):
-    PROGRESS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PROGRESS_PATH.write_text(json.dumps(progress, indent=1))
+def save_progress(progress: dict, path=None):
+    path = path or PROGRESS_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(progress, indent=1))
 
 
 def main():
@@ -116,7 +139,9 @@ def main():
     parser.add_argument("--estimate", action="store_true", help="Only print the cost estimate (free)")
     parser.add_argument("--budget", type=int, help="Max credits this run may spend (required unless --estimate)")
     parser.add_argument("--minutes-before", type=int, default=MINUTES_BEFORE,
-                        help="Snapshot this many minutes before kickoff")
+                        help="Closing snapshots: this many minutes before kickoff")
+    parser.add_argument("--snapshot", choices=["closing", "friday9"], default="closing",
+                        help="closing = before kickoff (default); friday9 = the Friday 9am CT before")
     args = parser.parse_args()
 
     games = load_games(args.start, args.end)
@@ -130,7 +155,19 @@ def main():
 
     teams = dict(pd.read_sql(text("SELECT team_name, team_id FROM teams"), engine).values)
     name_map = _load_odds_name_map()
-    progress = load_progress()
+    friday = args.snapshot == "friday9"
+    progress_path = FRIDAY_PROGRESS_PATH if friday else PROGRESS_PATH
+    progress = load_progress(progress_path)
+    # Batches: one per game day (closing) or one per Friday 9am snapshot (friday9)
+    if friday:
+        games["batch"] = games["start_time"].map(friday_9am_before)
+        # Same window as the live weekly job: games kicking off within 48h of it
+        live_window = (games["start_time"] - games["batch"]) <= timedelta(hours=48)
+        print(f"friday9: {live_window.sum():,} of {len(games):,} games kick off within 48h of a Friday "
+              f"9am snapshot (the rest the live job wouldn't capture either)")
+        games = games[live_window]
+    else:
+        games["batch"] = games["game_date"]
     session = SessionLocal()
 
     spent = requested = with_props = lines_stored = skipped = 0
@@ -138,16 +175,19 @@ def main():
     stopped_for_budget = False
 
     try:
-        for day in sorted(games["game_date"].unique(), reverse=True):
-            day_key = str(day)
+        for batch in sorted(games["batch"].unique(), reverse=True):
+            day_key = str(batch)
             if day_key in progress["done_days"]:
                 continue
-            day_games = games[games["game_date"] == day]
+            day_games = games[games["batch"] == batch]
             if spent + EVENTS_COST > args.budget:
                 stopped_for_budget = True
                 break
 
-            list_at = day_games["start_time"].min() - timedelta(minutes=args.minutes_before + 60)
+            if friday:
+                list_at = pd.Timestamp(batch)          # events as listed that Friday morning
+            else:
+                list_at = day_games["start_time"].min() - timedelta(minutes=args.minutes_before + 60)
             try:
                 events, remaining, cost = fetch_historical_events(iso(list_at))
             except OddsAPIError as exc:
@@ -167,7 +207,12 @@ def main():
                 game = by_matchup.get(frozenset(ids)) if None not in ids else None
                 if game is None:
                     continue
-                if already_captured(session, game.game_id, game.start_time):
+                if friday:
+                    target = pd.Timestamp(batch)
+                    window = (target - timedelta(hours=2), target + timedelta(hours=2))
+                else:
+                    window = (game.start_time - timedelta(hours=6), game.start_time)
+                if already_captured(session, game.game_id, *window):
                     skipped += 1
                     continue
                 if spent + PROPS_COST > args.budget:
@@ -175,7 +220,10 @@ def main():
                     day_complete = False        # come back to this day next run
                     break
 
-                snapshot_at = as_utc_datetime(event["commence_time"]) - timedelta(minutes=args.minutes_before)
+                if friday:
+                    snapshot_at = pd.Timestamp(batch)
+                else:
+                    snapshot_at = as_utc_datetime(event["commence_time"]) - timedelta(minutes=args.minutes_before)
                 try:
                     data, snapshot_ts, remaining, cost = fetch_historical_event_props(event["id"], iso(snapshot_at))
                 except OddsAPIError as exc:
@@ -206,7 +254,7 @@ def main():
             if not day_complete:
                 break
             progress["done_days"].append(day_key)
-            save_progress(progress)
+            save_progress(progress, progress_path)
             print(f"[backfill] {day_key}: {len(events)} events listed | so far {requested} games requested, "
                   f"{with_props} with props, {lines_stored} lines, {spent} credits spent, "
                   f"{remaining} remaining")

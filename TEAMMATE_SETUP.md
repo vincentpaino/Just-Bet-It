@@ -260,7 +260,12 @@ if credits run short it's the oldest that get skipped.
 python -m scripts.backfill_props --estimate --start 2024-08-01 --end 2026-11-02   # free
 python -m scripts.backfill_props --start 2025-10-11 --end 2025-10-11 --budget 400  # pilot day
 python -m scripts.backfill_props --start 2024-08-01 --end 2026-11-02 --budget 19000
+python -m scripts.backfill_props --snapshot friday9 --start 2025-08-01 --end 2026-10-31 --budget 5000
 ```
+
+`--snapshot friday9` fetches lines as of the Friday 9am CT before each
+Friday-night/Saturday game (what the weekly job captures live), which with
+the closing snapshots measures closing-line value (`python -m scripts.clv`).
 
 `--budget` is a hard cap. Progress is saved per day in
 `data/raw/backfill_progress.json` (gitignored), and games that already have a
