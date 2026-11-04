@@ -13,7 +13,10 @@
 # Then it grades the previous weekend's picks into reports/weekly_results.md
 # (see scripts/weekly_report.py), retrains the models on all games so far
 # (graded first, so each week is graded by the model that made its picks),
-# and backs up the database to data/raw/backups/ (last 8 kept).
+# records this week's picks in live_picks (scripts/record_picks.py; the
+# confident ones get a near-kickoff snapshot from scripts/snapshot_closing.sh
+# for live closing-line value), and backs up the database to
+# data/raw/backups/ (last 8 kept).
 #
 # Extra arguments are passed to run_ingestion and override the defaults
 # below, e.g. a cheaper test run:  scripts/snapshot_odds.sh --props-window-hours 24
@@ -60,5 +63,7 @@ PY
     # first means each week is graded by the model that made its picks).
     # If training fails, the previous models stay in place.
     /usr/bin/caffeinate -i "$PY" -m scripts.train || echo "[train] FAILED; keeping previous models"
+    # Record this week's picks (Friday line, all predictions) for live CLV; no credits
+    /usr/bin/caffeinate -i "$PY" -m scripts.record_picks || echo "[picks] FAILED; job continues"
     /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1

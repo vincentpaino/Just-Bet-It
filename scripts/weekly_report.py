@@ -18,6 +18,11 @@ Two strategies are tracked: betting every game, and "confident picks", a
 rule fixed in advance (CONFIDENT_RULE) that only counts games played after
 the date it was registered, so it can't be tuned to results already seen.
 
+Live closing-line value: for confident picks recorded on Friday
+(scripts/record_picks.py, table live_picks) and snapshotted shortly before
+kickoff (scripts/snapshot_closing.py, table qb_prop_closing_lines), how far
+the line moved toward the pick. Positive CLV is the early sign of a real edge.
+
 The weekly job (scripts/snapshot_odds.sh) runs this right after it pulls the
 previous weekend's results. Run by hand from the project root:
     python -m scripts.weekly_report
@@ -157,6 +162,7 @@ def summary_markdown(picks: pd.DataFrame) -> str:
         out.append(line_for(f"**{season} total**", "", df, ""))
 
     out += confident_section(picks)
+    out += live_clv_section(load_live_clv())
 
     out += ["", "Every graded pick, with the line, prices and model version, is in `reports/graded_picks.csv`.",
             "Small samples are noisy: a few hundred bets are needed before a win rate means much.", ""]
@@ -191,6 +197,63 @@ def confident_section(picks: pd.DataFrame) -> list:
         out.append(row(season, week, elig, chosen[(chosen["season"] == season) & (chosen["week"] == week)]))
     for season, elig in eligible.groupby("season", sort=True):
         out.append(row(f"**{season} total**", "", elig, chosen[chosen["season"] == season]))
+    return out
+
+
+def live_clv(picks: pd.DataFrame, closing: pd.DataFrame) -> pd.DataFrame:
+    """Confident picks with a closing snapshot: closing consensus (median across
+    books, each book's last snapshot) and CLV in yards toward the pick."""
+    if picks.empty or closing.empty:
+        return picks.iloc[0:0].assign(close_line=[], clv=[])
+    last = closing[closing["fetched_at"] == closing.groupby(
+        ["game_id", "player_id", "sportsbook"])["fetched_at"].transform("max")]
+    close = last.groupby(["game_id", "player_id"])["line"].median().rename("close_line").reset_index()
+    d = picks.merge(close, on=["game_id", "player_id"])
+    sign = np.where(d["side"] == "OVER", 1.0, -1.0)
+    return d.assign(clv=sign * (d["close_line"] - d["line"]))
+
+
+def load_live_clv() -> dict:
+    """Recorded confident picks (whose games have kicked off) and their CLV."""
+    try:
+        picks = pd.read_sql(text("""
+            SELECT lp.game_id, lp.player_id, lp.line::float AS line, lp.side, g.season, g.week
+            FROM live_picks lp JOIN games g USING (game_id)
+            WHERE lp.confident AND lp.kickoff < now()
+        """), engine)
+        closing = pd.read_sql(text("""
+            SELECT game_id, player_id, sportsbook, line::float AS line, fetched_at
+            FROM qb_prop_closing_lines WHERE player_id IS NOT NULL
+        """), engine)
+    except Exception as exc:   # tables missing (older database): skip the section
+        print(f"[report] live CLV skipped ({type(exc).__name__})")
+        return {"picks": pd.DataFrame(), "clv": pd.DataFrame()}
+    return {"picks": picks, "clv": live_clv(picks, closing)}
+
+
+def live_clv_section(data: dict) -> list:
+    """Week-by-week live CLV of the confident picks."""
+    picks, clv = data["picks"], data["clv"]
+    out = ["", "## Live closing-line value (confident picks)", "",
+           "How far each confident pick's line (Friday consensus, when the pick was recorded) moved "
+           "toward our side by a snapshot shortly before kickoff, in yards: positive means the market "
+           "agreed with us after we'd have bet. In the 2024-26 backtest confident picks averaged "
+           "+2.5 yds. Wins/losses are still graded at the Friday line above.", ""]
+    if picks.empty:
+        return out + ["_No recorded confident picks have kicked off yet._"]
+    header = "| Season | Week | Confident picks | With closing snapshot | Mean CLV (yds) | Moved our way | Moved against |"
+    out += [header, "|" + "---|" * (header.count("|") - 1)]
+
+    def row(label_season, label_week, p, c):
+        if c.empty:
+            return f"| {label_season} | {label_week} | {len(p)} | 0 | - | - | - |"
+        return (f"| {label_season} | {label_week} | {len(p)} | {len(c)} | {c['clv'].mean():+.1f} | "
+                f"{np.mean(c['clv'] > 0):.0%} | {np.mean(c['clv'] < 0):.0%} |")
+
+    for (season, week), p in picks.groupby(["season", "week"], sort=True):
+        out.append(row(season, week, p, clv[(clv["season"] == season) & (clv["week"] == week)]))
+    for season, p in picks.groupby("season", sort=True):
+        out.append(row(f"**{season} total**", "", p, clv[clv["season"] == season]))
     return out
 
 

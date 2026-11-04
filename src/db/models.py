@@ -497,3 +497,45 @@ class GameLine(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+
+
+class LivePick(Base):
+    """A pick as the Friday job made it: Friday consensus line, predictions, side."""
+    __tablename__ = "live_picks"
+    __table_args__ = (UniqueConstraint("game_id", "player_id", name="uq_live_pick"),)
+
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.game_id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(BigInteger, nullable=False)
+    player_name = Column(String(100), nullable=False)
+    kickoff = Column(DateTime(timezone=True), nullable=False)
+    made_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    line = Column(Numeric(6, 1), nullable=False)
+    books = Column(Integer)
+    pred_xgboost = Column(Numeric(6, 1))
+    pred_ensemble = Column(Numeric(6, 1))
+    pred_linear_regression = Column(Numeric(6, 1))
+    pred_random_forest = Column(Numeric(6, 1))
+    pred_neural_network = Column(Numeric(6, 1))
+    side = Column(String(5), nullable=False)
+    edge = Column(Numeric(6, 1))
+    confident = Column(Boolean, nullable=False)
+    model_trained_through = Column(Date)
+
+
+class QBPropClosingLine(Base):
+    """Near-kickoff snapshot of a confident pick's prop lines (live CLV)."""
+    __tablename__ = "qb_prop_closing_lines"
+    __table_args__ = (UniqueConstraint("game_id", "player_id", "sportsbook", "fetched_at",
+                                       name="uq_qb_prop_closing"),)
+
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey("games.game_id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(BigInteger)
+    player_name = Column(String(100), nullable=False)
+    sportsbook = Column(String(100), nullable=False)
+    line = Column(Numeric(6, 1), nullable=False)
+    over_odds = Column(Numeric(8, 2))
+    under_odds = Column(Numeric(8, 2))
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+

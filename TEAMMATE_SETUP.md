@@ -240,6 +240,22 @@ results already seen. To try a different rule, register a new one with a new
 date in `CONFIDENT_RULE` instead of editing this one. Commit the two files
 to share the latest week, or run `python -m scripts.weekly_report` yourself.
 
+**Live closing-line value:** after retraining, the Friday job records that
+week's picks in the `live_picks` table (`scripts/record_picks.py`: the Friday
+consensus line, all four predictions, the side and the confident flag; each
+pick is written once and never overwritten). A second launchd job,
+`scripts/snapshot_closing.sh` (Friday 4pm, Saturday 10am, 1pm, 4pm and 7pm),
+takes one more snapshot of only the **confident** picks shortly before their
+games kick off, into `qb_prop_closing_lines` (kept apart from `qb_prop_lines`,
+so picks are still graded at the Friday line). It costs 1 credit per game,
+about 15-25 a week, with the same 50-credit floor; log in
+`logs/snapshot_closing.log`. The weekly report's "Live closing-line value"
+section shows how far those lines moved toward our picks (the backtest
+average was +2.5 yds). The installer sets up both jobs. `pmset` can only
+schedule one repeating wake (Friday 8:55), so the Saturday runs need the Mac
+awake; a run missed while it slept happens on wake and skips games that have
+already started.
+
 `scripts/backtest.py` scores the models against each book's last line before
 kickoff, at the real prices. It reports "no QB games" until lines have been
 captured for games that have since been played and ingested.

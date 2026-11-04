@@ -223,4 +223,47 @@ CREATE TABLE IF NOT EXISTS game_lines (
 
 CREATE INDEX IF NOT EXISTS idx_game_lines_game ON game_lines (game_id);
 
+-- ---------------------------------------------------------------------------
+-- LIVE PICKS  (the model's picks, recorded when the Friday job makes them)
+-- line = Friday consensus (median across books); side vs that line.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS live_picks (
+    id                    SERIAL PRIMARY KEY,
+    game_id               INTEGER NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+    player_id             BIGINT NOT NULL,
+    player_name           VARCHAR(100) NOT NULL,
+    kickoff               TIMESTAMPTZ NOT NULL,
+    made_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+    line                  NUMERIC(6,1) NOT NULL,
+    books                 INTEGER,
+    pred_xgboost          NUMERIC(6,1),
+    pred_ensemble         NUMERIC(6,1),
+    pred_linear_regression NUMERIC(6,1),
+    pred_random_forest    NUMERIC(6,1),
+    pred_neural_network   NUMERIC(6,1),
+    side                  VARCHAR(5) NOT NULL,     -- 'OVER' | 'UNDER'
+    edge                  NUMERIC(6,1),            -- XGBoost - line
+    confident             BOOLEAN NOT NULL,
+    model_trained_through DATE,
+    CONSTRAINT uq_live_pick UNIQUE (game_id, player_id)
+);
+
+-- ---------------------------------------------------------------------------
+-- QB PROP CLOSING LINES  (near-kickoff snapshots of confident picks, for live
+-- closing-line value; kept apart from qb_prop_lines, whose Friday lines are
+-- what picks are graded at)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS qb_prop_closing_lines (
+    id           SERIAL PRIMARY KEY,
+    game_id      INTEGER NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
+    player_id    BIGINT,
+    player_name  VARCHAR(100) NOT NULL,
+    sportsbook   VARCHAR(100) NOT NULL,
+    line         NUMERIC(6,1) NOT NULL,
+    over_odds    NUMERIC(8,2),
+    under_odds   NUMERIC(8,2),
+    fetched_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_qb_prop_closing UNIQUE (game_id, player_id, sportsbook, fetched_at)
+);
+
 COMMIT;
