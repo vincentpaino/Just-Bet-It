@@ -43,7 +43,7 @@ from src.db.models import (
 
 from src.db.session import SessionLocal, init_db
 
-from .dates import as_utc_datetime, to_game_date, utc_date
+from .dates import as_utc_datetime, current_season, to_game_date, utc_date
 
 from .odds_api import (
     fetch_event_props,
@@ -817,8 +817,6 @@ def _run_step(session, label: str, source: str, func, year: int):
 
 def main():
 
-    print("SCRIPT STARTED")
-
     parser = argparse.ArgumentParser(
         description="Run Just-Bet-It data ingestion."
     )
@@ -826,8 +824,9 @@ def main():
     parser.add_argument(
         "--year",
         type=int,
-        default=datetime.now(timezone.utc).year,
-        help="Season year to ingest.",
+        default=current_season(),
+        help="Season to ingest (default: the current one; January bowl games "
+             "belong to the previous year's season).",
     )
 
     # Both Odds API steps are opt-in so a normal ingestion run never spends
@@ -836,12 +835,6 @@ def main():
         "--odds",
         action="store_true",
         help="Also snapshot game odds: moneyline, spread, total (3 Odds API credits).",
-    )
-
-    parser.add_argument(
-        "--skip-odds",
-        action="store_true",
-        help=argparse.SUPPRESS,  # old flag; odds are now off unless --odds
     )
 
     parser.add_argument(

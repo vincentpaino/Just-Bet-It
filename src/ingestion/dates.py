@@ -67,6 +67,13 @@ def to_game_date(value, time_tbd: bool = False):
     return dt.astimezone(GAME_DAY_TZ).date()
 
 
+def current_season(today: date | None = None) -> int:
+    """The college football season in progress: bowls and the playoff run
+    into January, so January to July still belong to last year's season."""
+    today = today or date.today()
+    return today.year if today.month >= 8 else today.year - 1
+
+
 def utc_date(value):
     """
     The UTC calendar date. This is how game dates were stored BEFORE the fix,

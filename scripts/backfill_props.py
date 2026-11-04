@@ -35,7 +35,7 @@ Run from the project root:
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd

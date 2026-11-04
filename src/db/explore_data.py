@@ -9,7 +9,6 @@ of the app (the shared DATABASE_URL or local DB_* settings in .env).
 """
 import os
 
-import numpy as np
 import pandas as pd
 import matplotlib
 

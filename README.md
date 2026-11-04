@@ -1,8 +1,9 @@
 # Just Bet It
 
-AI-powered NCAA football sports betting prediction system. Ensemble of
-Logistic Regression, Random Forest, XGBoost, and a Neural Net, with
-isotonic calibration, +EV detection, and Kelly Criterion bet sizing.
+NCAA football QB passing-yards prop predictions. Linear regression, random
+forest, XGBoost and a neural net (plus their average), compared against real
+sportsbook lines, with +EV detection, line shopping and Kelly Criterion bet
+sizing.
 
 **Team:** Zach Burns (Backend/Systems), Vince Paino (ML), Cody Shouse (Data)
 **Mentor:** Brooks Noonan
@@ -10,31 +11,29 @@ isotonic calibration, +EV detection, and Kelly Criterion bet sizing.
 ## Project layout
 
 ```
-data/           raw/processed data (gitignored — see data/README.md)
-notebooks/      exploratory analysis
+app.py          Streamlit dashboard
 src/
-  data/         ingestion (Odds API, Sportsipy) + preprocessing
-  models/       LR, RF, XGBoost, NN training code
-  calibration/  isotonic calibration
-  ensemble/     weighted ensemble logic
-  betting/      Kelly sizing, EV filtering, line shopping
-  db/           SQLAlchemy models + connection (database.py, models.py)
-  utils/        shared helpers
-models/         trained model artifacts (gitignored)
-tests/          unit tests
-configs/        hyperparameters, paths
-scripts/        CLI entry points (train.py, predict.py, backtest.py)
+  ingestion/    CFBD and Odds API ingestion (run_ingestion.py is the entry point)
+  betting/      odds math, win probabilities, EV, Kelly sizing, line shopping
+  db/           schema.sql, SQLAlchemy models, connection (session.py)
+scripts/        features + training (xgboost_reg.py, train.py), predictions,
+                backtests, weekly report, scheduled jobs (*.sh)
+configs/        tuned XGBoost hyperparameters
+reports/        weekly results and experiment write-ups
+tests/          unit tests (python -m pytest)
+data/           backups and caches (gitignored, see data/README.md)
+models/         trained models (gitignored; python -m scripts.train)
 ```
 
 ## Setup
 
 1. `python -m venv venv && source venv/bin/activate` (or use PyCharm's interpreter setup)
 2. `pip install -r requirements.txt`
-3. `cp .env.example .env` and fill in `DATABASE_URL` and `ODDS_API_KEY`
-4. Set up Postgres locally (or via Docker), then:
-   ```
-   alembic upgrade head
-   ```
+3. `cp src/.env.example .env` and fill in `DATABASE_URL`, `CFBD_API_KEY` and
+   (only for the weekly props job) `ODDS_API_KEY`
+4. On the shared Neon database the tables already exist. For a local
+   Postgres, create them with `psql -d just_bet_it -f src/db/schema.sql`
+   (see TEAMMATE_SETUP.md).
 ## Dashboard
 
 A web UI over the same models and data: this week's picks vs. sportsbook
@@ -71,6 +70,9 @@ Tests: `python -m pytest` from the project root.
 
 ## Database
 
-PostgreSQL, six tables: `games`, `teams`, `features`, `odds`, `users`,
-`user_predictions`. Models live in `src/db/models.py`; migrations are
-managed with Alembic (`alembic/` directory).
+PostgreSQL. The tables in use: `teams`, `games`, `game_lines` (CFBD spreads
+and totals), `qb_game_stats`, `team_game_stats`, `odds`, `qb_prop_lines`
+(Friday prop snapshots), `live_picks` and `qb_prop_closing_lines` (live
+closing-line value) and `ingestion_log`. The schema is `src/db/schema.sql`,
+with matching SQLAlchemy models in `src/db/models.py`; new tables are created
+by `init_db()` when ingestion runs.

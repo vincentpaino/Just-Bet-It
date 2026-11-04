@@ -12,7 +12,7 @@ expected value; it's flagged `qualifies` only if it clears the config's
 minimum EV and minimum edge.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -28,9 +28,6 @@ class BetConfig:
     kelly_multiplier: float = 0.25  # quarter Kelly
     max_stake: float = 0.05         # never more than 5% of bankroll on one bet
     max_daily_exposure: float = 0.30  # all of one day's bets together: at most 30%
-
-    def as_dict(self):
-        return asdict(self)
 
 
 def evaluate_side(prediction, line, price, side, prob_model, config=None):
@@ -129,7 +126,7 @@ def simulate_bankroll(bets: pd.DataFrame, prediction_col: str, prob_model, confi
             log.append({
                 "game_date": date, "game_id": row.game_id, "player_id": row.player_id,
                 "side": bet["side"], "line": row.line, "price": bet["price"],
-                "prediction": pred,
+                "prediction": getattr(row, prediction_col),
                 "actual": actual, "p_win": bet["p_win"], "ev": bet["ev"],
                 "stake_fraction": frac, "stake": stake, "result": result,
                 "profit": profit, "bankroll": bankroll,

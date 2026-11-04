@@ -115,9 +115,8 @@ Sign up free at [collegefootballdata.com](https://collegefootballdata.com)
 (1,000 requests/month free tier — better than the old plan anyway).
 Copy your key into `CFBD_API_KEY` in your `.env`.
 
-`sportsipy_ingest.py` is still in the repo for reference, but
-`run_ingestion.py` now imports from `cfbd_ingest.py` instead. If you're
-picking up Sprint 2 historical-stats work, start from `cfbd_ingest.py`.
+All stats ingestion lives in `cfbd_ingest.py` (the old Sportsipy module
+was removed; it's in git history if anyone needs it).
 
 ## 7. Install the `cfbd` package
 
@@ -158,7 +157,6 @@ python -m scripts.predict_upcoming   # predictions vs. sportsbook lines for upco
 python -m scripts.predict --qb-id 5078810 --game-date 2026-10-24   # one QB, one game
 python -m scripts.backtest           # score the models against stored real lines
 python -m scripts.weekly_report      # update reports/ with newly graded games
-python -m scripts.line_model         # test models that use the sportsbook line as an input
 python -m scripts.compare_features   # stats-only vs stats + market features, same games and split
 python scripts/xgboost_reg.py        # XGBoost analysis: baselines, feature importance
 python scripts/xgboost_reg_tune.py   # re-tune XGBoost (Optuna, ~3 min) -> configs/

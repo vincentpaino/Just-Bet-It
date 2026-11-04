@@ -67,3 +67,31 @@ def test_clv_uses_each_books_last_snapshot_and_the_pick_side():
 def test_clv_section_before_any_picks():
     section = live_clv_section({"picks": pd.DataFrame(), "clv": pd.DataFrame()})
     assert "No recorded confident picks" in section[-1]
+
+
+def test_graded_games_use_recorded_picks_and_skip_unrecorded_ones_before_the_cutoff():
+    from datetime import date
+    from scripts.weekly_report import ALL_MODELS, with_predictions
+
+    class Constant:
+        def __init__(self, v): self.v = v
+        def predict(self, X): return [self.v] * len(X)
+
+    bundle = {"models": {m: Constant(200.0) for m in ALL_MODELS if m != "ensemble"},
+              "features": ["f"], "train_end": pd.Timestamp("2026-11-01")}
+    games = pd.DataFrame({"game_id": [1, 2, 3], "player_id": [10, 20, 30], "f": [0, 0, 0],
+                          "game_date": pd.to_datetime(["2026-10-31", "2026-10-31", "2026-11-07"])})
+    recorded = pd.DataFrame({"game_id": [1], "player_id": [10], "model_trained_through": [date(2026, 10, 30)],
+                             **{m: [250.0] for m in ALL_MODELS}})
+    out = with_predictions(games, bundle, recorded).set_index("game_id")
+    assert list(out.index) == [1, 3]                    # game 2: not recorded and before the cutoff
+    assert out.loc[1, "p_xgboost"] == 250.0             # the pick actually made on Friday
+    assert out.loc[1, "p_model_trained_through"] == date(2026, 10, 30)
+    assert out.loc[3, "p_xgboost"] == 200.0             # current models, after their cutoff
+
+
+@pytest.mark.parametrize("today, season", [("2026-11-04", 2026), ("2027-01-09", 2026), ("2027-08-29", 2027)])
+def test_current_season_keeps_january_bowls_in_last_years_season(today, season):
+    from datetime import date
+    from src.ingestion.dates import current_season
+    assert current_season(date.fromisoformat(today)) == season

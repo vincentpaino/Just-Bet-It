@@ -66,15 +66,19 @@ def load_upcoming_lines(hours: int) -> pd.DataFrame:
 
 
 def upcoming_qbs(lines: pd.DataFrame) -> pd.DataFrame:
-    """One row per (game, QB), with the QB's team and opponent for this game."""
+    """One row per (game, QB), with the QB's team and opponent for this game.
+    The QB's team is whichever of the two he most recently played for; a QB
+    who has never played for either (can't tell his side) is dropped."""
     qbs = lines.drop_duplicates(["game_id", "player_id"]).copy()
 
-    # The QB's team is the one he most recently played for.
-    latest_team = pd.read_sql(text("""
-        SELECT DISTINCT ON (player_id) player_id, team_id
-        FROM qb_game_stats ORDER BY player_id, game_date DESC
+    last_game = pd.read_sql(text("""
+        SELECT player_id, team_id, MAX(game_date) AS last_played
+        FROM qb_game_stats GROUP BY player_id, team_id
     """), engine)
-    qbs = qbs.merge(latest_team, on="player_id", how="left")
+    sides = pd.concat([qbs.assign(team_id=qbs[col]) for col in ("home_team_id", "away_team_id")])
+    sides = sides.merge(last_game, on=["player_id", "team_id"])
+    qbs = (sides.sort_values("last_played", ascending=False)
+           .drop_duplicates(["game_id", "player_id"]).drop(columns="last_played"))
 
     is_home = qbs["team_id"] == qbs["home_team_id"]
     qbs["is_home"] = is_home

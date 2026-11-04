@@ -10,8 +10,10 @@ Writes two files in reports/:
   weekly_results.md    week-by-week summary built from graded_picks.csv,
                        with running season totals.
 
-A game is graded with whatever models are trained at the time, and only if
-it's after their training cutoff (same rule as backtest.py). Picks are flat
+A game with a pick recorded on Friday (live_picks, scripts/record_picks.py)
+is graded with those recorded predictions: the picks actually made. Older
+games are graded with whatever models are trained at the time, and only if
+they're after the training cutoff (same rule as backtest.py). Picks are flat
 1-unit bets on the side the model favors, paid at the book's real price.
 
 Two strategies are tracked: betting every game, and "confident picks", a
@@ -83,18 +85,46 @@ def is_confident(preds: dict, line: float, game_date: str, rule: dict = CONFIDEN
     return bool(abs(preds["xgboost"] - line) >= rule["min_edge"] and len(sides) == 1 and 0 not in sides)
 
 
+ALL_MODELS = CONFIDENT_RULE["models"] + ["ensemble"]
+
+
+def recorded_predictions() -> pd.DataFrame:
+    """Predictions recorded when the picks were made (live_picks), one row per QB-game."""
+    try:
+        return pd.read_sql(text(
+            "SELECT game_id, player_id, model_trained_through, "
+            + ", ".join(f"pred_{m}::float AS {m}" for m in ALL_MODELS) + " FROM live_picks"), engine)
+    except Exception as exc:   # table missing (older database): grade the old way
+        print(f"[report] recorded picks unavailable ({type(exc).__name__}); re-predicting")
+        return pd.DataFrame(columns=["game_id", "player_id", "model_trained_through", *ALL_MODELS])
+
+
+def with_predictions(games: pd.DataFrame, bundle, recorded: pd.DataFrame) -> pd.DataFrame:
+    """Each game's predictions: the recorded ones if the pick was recorded on Friday,
+    else the current models' (only fair for games after their training cutoff)."""
+    current = pd.DataFrame(predict_all(bundle["models"], games[bundle["features"]]))
+    current["model_trained_through"] = pd.Timestamp(bundle["train_end"]).date()
+    games = games.reset_index(drop=True)
+    rec = games[["game_id", "player_id"]].merge(recorded, on=["game_id", "player_id"], how="left")
+    is_recorded = rec["xgboost"].notna().to_numpy()
+    preds = current.copy()
+    preds.loc[is_recorded] = rec.loc[is_recorded, current.columns].to_numpy()
+    keep = is_recorded | (games["game_date"] > pd.Timestamp(bundle["train_end"])).to_numpy()
+    return games.join(preds.add_prefix("p_"))[keep].reset_index(drop=True)
+
+
 def new_graded_rows(bundle, already: set) -> pd.DataFrame:
     """Graded games not in the file yet, with each tracked model's pick and result."""
-    _, games = load_graded_games(bundle)
-    if games.empty:
-        return games
-
+    games, _ = load_graded_games(bundle)
     keys = list(zip(games["game_id"], games["player_id"]))
     games = games[[k not in already for k in keys]].reset_index(drop=True)
     if games.empty:
         return games
 
-    preds = predict_all(bundle["models"], games[bundle["features"]])
+    games = with_predictions(games, bundle, recorded_predictions())
+    if games.empty:
+        return games
+    preds = {m: games[f"p_{m}"].to_numpy(dtype=float) for m in ALL_MODELS}
     teams = dict(pd.read_sql(text("SELECT team_id, team_name FROM teams"), engine).values)
 
     rows = []
@@ -119,7 +149,7 @@ def new_graded_rows(bundle, already: set) -> pd.DataFrame:
             {name: float(preds[name][i]) for name in CONFIDENT_RULE["models"]},
             row["line"], row["game_date"],
         )
-        row["model_trained_through"] = pd.Timestamp(bundle["train_end"]).date().isoformat()
+        row["model_trained_through"] = pd.Timestamp(g["p_model_trained_through"]).date().isoformat()
         row["model_features"] = len(bundle["features"])   # 17 = stats only, 20 = stats + market
         row["graded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         rows.append(row)

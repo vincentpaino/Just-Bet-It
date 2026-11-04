@@ -6,11 +6,10 @@ that run_ingestion.py writes to PostgreSQL.
 """
 
 import os
-from datetime import datetime
 
 import pandas as pd
 
-from .dates import as_utc_datetime, to_game_date
+from .dates import as_utc_datetime, current_season, to_game_date
 
 try:
     import cfbd
@@ -280,7 +279,7 @@ def fetch_qb_season_stats(year):
         6. Return flat records ready for database insertion.
     """
 
-    season_is_over = year < datetime.now().year
+    season_is_over = year < current_season()
 
     with _get_api_client() as api_client:
         games_api = cfbd.GamesApi(api_client)

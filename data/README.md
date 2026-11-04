@@ -5,8 +5,12 @@ live in git history.
 
 ## Regenerating raw data
 
-- Historical NCAA football stats (2015–present): pulled via `sportsipy`, see `src/data/`
-- Betting odds (40+ sportsbooks): pulled via The Odds API, see `src/data/`
+Everything lives in the Postgres database, not in files here:
 
-Run the ingestion scripts in `scripts/` to repopulate `raw/` and `processed/`
-locally, or pull directly from the Postgres database once ingestion has run.
+- NCAA football games, game lines and QB stats: CollegeFootballData.com,
+  via `python -m src.ingestion.run_ingestion` (see `src/ingestion/`)
+- QB passing-yards prop lines: The Odds API, via the weekly job
+  (`scripts/snapshot_odds.sh`)
+
+`raw/` holds database backups (`raw/backups/`, from `scripts/backup_db.py`)
+and caches that scripts rebuild on their own.

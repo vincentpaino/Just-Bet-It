@@ -12,7 +12,6 @@ exactly what the command-line scripts compute.
 import html
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import altair as alt
@@ -442,11 +441,14 @@ def page_qb():
             dots = alt.Chart(mine.dropna(subset=["xgboost"])).mark_point(
                 filled=True, size=90, color=INK, shape="diamond").encode(x=x, y="xgboost:Q")
             st.altair_chart((bars + dots).properties(height=320), width="stretch")
-            st.caption("Bars are actual passing yards. Diamonds are what XGBoost predicted before each game, "
-                       "using only earlier games.")
+            train_end = pd.Timestamp(b["train_end"])
+            st.caption("Bars are actual passing yards. Diamonds are XGBoost's prediction from pregame "
+                       f"features (earlier games only). The current models were trained on games through "
+                       f"{train_end:%b %d, %Y}, results included, so those diamonds are fitted, not forecasts.")
             scored = mine.dropna(subset=["xgboost"])
+            scored = scored[scored["game_date"] > train_end]
             if len(scored):
-                st.caption(f"Model's average miss on these games: "
+                st.caption(f"Model's average miss on the {len(scored)} of these games it never trained on: "
                            f"{(scored['xgboost'] - scored['passing_yards']).abs().mean():.0f} yards.")
 
     with right:

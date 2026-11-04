@@ -25,11 +25,12 @@ just_bet_it=# <insert-command-here>
 
 List of useful commands:
 
-    dt                              -- confirm the six tables exist
+    \dt                             -- list the tables
     \d <table-name>                 -- column/feature names and types
     SELECT COUNT(*) FROM games;
     SELECT * FROM games LIMIT 10;
     \x auto                          -- switches to vertical output when rows are wide
 
 Other Notes:
-The "qb_game_features" table is where the engineered features live
+Model features aren't stored in the database: scripts/xgboost_reg.py builds
+them from qb_game_stats and game_lines every time the models run.

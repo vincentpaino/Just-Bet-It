@@ -10,7 +10,6 @@
 #   * Only after the search finishes do we score the best params once on the test set.
 
 import json
-from pathlib import Path
 
 import numpy as np
 import optuna

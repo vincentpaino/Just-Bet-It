@@ -13,7 +13,6 @@ needs to know where the database lives.
 """
 
 import os
-from contextlib import contextmanager
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -57,16 +56,3 @@ def init_db() -> None:
     """Create all tables if they don't exist yet (dev convenience;
     prefer schema.sql + migrations for anything past local dev)."""
     Base.metadata.create_all(bind=engine)
-
-
-@contextmanager
-def get_session():
-    """Yield a session, closing it afterward. Use as a context manager:
-        with get_session() as session:
-            ...
-    """
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
