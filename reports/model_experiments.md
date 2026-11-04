@@ -183,6 +183,31 @@ Code: `python -m scripts.clv` (needs the walk-forward cache from
 `scripts/vs_closing_lines.py` on the experiments branch);
 `scripts/backfill_props.py --snapshot friday9`.
 
+## Turning the edge into profit (November 4, 2026): not proven
+
+Three strategies fixed before running, betting at the Friday 9am snapshot with
+walk-forward predictions. Testing three at once, the bar was tightened to
+one-sided p < 0.017 (0.05 / 3) on mean profit per 1-unit bet.
+
+| Strategy | Bets | Record | Units | ROI | p | Verdict |
+|---|---|---|---|---|---|---|
+| 1. Confident picks at the best line/price (line shopping) | 278 | 149-129 | +0.58 | +0.2% | 0.485 | fail |
+| 2. Only 25+ yard edges, line shopping | 114 | 65-49 | +7.41 | +6.5% | 0.229 | fail |
+| 3. EV >= +3% via `src/betting` (probabilities from 2024 misses only) | 557 | 305-252 | +15.71 | +2.8% | 0.239 | fail |
+| *(reference) confident picks at a typical book* | 278 | 148-130 | -0.22 | -0.1% | | |
+
+**All three made money; none is proven.** Line shopping barely helped (books
+mostly agree on Friday mornings). Bigger edges and the EV filter look best,
+but at these returns the noise is huge: proving a +2.8% ROI at p < 0.017 with
+80% power takes about 10,000 bets, and +6.5% about 1,900. At the current pace
+(about 40 EV bets and 8 big-edge bets a week) that's roughly 250 weeks, many
+seasons. The honest summary: the model has a real edge in the line (CLV), and
+the profit numbers lean positive, but a semester of data can't confirm
+profitability; only a long live track record could.
+
+Code: `experiments/model-ideas` branch, commit `1e01910`
+(`python -m scripts.profit_tests`).
+
 ## What the experiments say overall
 
 Only new information has helped (the market features). Re-measuring the same
