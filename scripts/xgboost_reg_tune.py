@@ -8,8 +8,14 @@
 #   * Tuning uses time-series cross-validation inside the training data:
 #     each fold trains on earlier games and validates on later ones.
 #   * Only after the search finishes do we score the best params once on the test set.
+#
+# To backtest seasons with settings that never saw them, tune only on earlier
+# games (all of them, in time-series CV; no test-set check):
+#     python3 scripts/xgboost_reg_tune.py --before 2024-08-01 --out configs/xgboost_reg_params_pre2024.json
 
+import argparse
 import json
+from pathlib import Path
 
 import numpy as np
 import optuna
@@ -71,12 +77,23 @@ def objective(trial: optuna.Trial, X, y) -> float:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Tune XGBoost hyperparameters with Optuna")
+    parser.add_argument("--before", help="Tune only on games before this date (YYYY-MM-DD); no test-set check")
+    parser.add_argument("--out", type=Path, default=BEST_PARAMS_PATH, help="Where to save the settings")
+    args = parser.parse_args()
+
     # Same data prep and date split as xgboost_reg.py
     data = filter_trainable(build_features(load_qb_games()))
     data = data.sort_values("game_date").reset_index(drop=True)
-    cutoff = data["game_date"].quantile(1 - TEST_FRACTION)
-    train = data[data["game_date"] <= cutoff]
-    test = data[data["game_date"] > cutoff]
+    if args.before:
+        train = data[data["game_date"] < args.before]
+        test = data.iloc[0:0]
+        print(f"Tuning only on games before {args.before} "
+              f"({train['game_date'].min().date()} to {train['game_date'].max().date()})")
+    else:
+        cutoff = data["game_date"].quantile(1 - TEST_FRACTION)
+        train = data[data["game_date"] <= cutoff]
+        test = data[data["game_date"] > cutoff]
 
     X_train, y_train = train[FEATURES], train["passing_yards"]
     X_test, y_test = test[FEATURES], test["passing_yards"]
@@ -95,8 +112,11 @@ if __name__ == "__main__":
     for k, v in study.best_params.items():
         print(f"  {k}: {v}")
 
-    BEST_PARAMS_PATH.write_text(json.dumps(study.best_params, indent=2))
-    print(f"\nSaved to {BEST_PARAMS_PATH} (scripts/xgboost_reg.py uses it from now on)")
+    args.out.write_text(json.dumps(study.best_params, indent=2))
+    print(f"\nSaved to {args.out}"
+          + (" (scripts/xgboost_reg.py uses it from now on)" if args.out == BEST_PARAMS_PATH else ""))
+    if test.empty:
+        raise SystemExit(0)
 
     # One-time test evaluation: tuned vs. your original hand-picked settings
     for label, params in [("Default (hand-picked)", DEFAULT_PARAMS), ("Optuna-tuned", study.best_params)]:

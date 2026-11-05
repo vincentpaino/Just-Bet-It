@@ -47,6 +47,14 @@ streamlit run app.py
 It opens at http://localhost:8501. Code is in `app.py`; theme and bundled
 fonts are in `.streamlit/config.toml` and `static/fonts/`.
 
+The Backtest page and the QB lookup's past predictions use walk-forward
+predictions (every week predicted by models trained only on earlier games),
+cached in `data/raw/walkforward_preds_pre2024.csv`, with XGBoost settings
+tuned only on games before 2024 so nothing it scores was used to choose them.
+The file is gitignored, so build it once (a few minutes); without it, those
+pages only score games played after the last training run:
+`python -m scripts.vs_closing_lines --params configs/xgboost_reg_params_pre2024.json --cache data/raw/walkforward_preds_pre2024.csv`
+
 ## Betting (`src/betting/`)
 
 Turns a passing-yards prediction into a bet decision:

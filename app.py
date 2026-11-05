@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 st.set_page_config(page_title="Just Bet It", page_icon="🏈", layout="wide")
 
 from scripts.backtest import american_payout, load_closing_prop_lines, simulate_betting_strategy  # noqa: E402
+from scripts.weekly_report import CONFIDENT_RULE  # noqa: E402
 from scripts.predict_upcoming import format_kickoff, load_upcoming_lines, upcoming_qbs  # noqa: E402
 from scripts.train import MODELS_PATH, load_models, predict_all  # noqa: E402
 from scripts.xgboost_reg import build_features, build_upcoming_features, has_history, load_qb_games  # noqa: E402
@@ -34,6 +35,16 @@ from src.betting import BetConfig, best_bet, cap_exposure, evaluate_side, from_b
 from src.db.session import SessionLocal, engine  # noqa: E402
 
 OVER, UNDER, INK, MUTED, GOLD = "#1F7A4D", "#B03A2E", "#14213D", "#5B6573", "#C9A227"
+# Chart legends above the plot, wrapping instead of running off the edge
+LEGEND_TOP = alt.Legend(orient="top", title=None, columns=3, labelLimit=160)
+
+# Walk-forward predictions for past games with lines (scripts/vs_closing_lines.py):
+# each week predicted by models trained only on the games before it. The clean
+# set (XGBoost settings tuned only on games before 2024) is preferred.
+WALKFORWARD = next((f for f in (ROOT / "data" / "raw" / "walkforward_preds_pre2024.csv",
+                                ROOT / "data" / "raw" / "walkforward_preds.csv") if f.exists()),
+                   ROOT / "data" / "raw" / "walkforward_preds_pre2024.csv")
+REPORTS = ROOT / "reports"
 MODEL_NAMES = {
     "xgboost": "XGBoost", "ensemble": "Ensemble", "random_forest": "Random forest",
     "linear_regression": "Linear regression", "neural_network": "Neural net",
@@ -151,12 +162,12 @@ def upcoming_picks(hours, mtime, min_ev, kelly):
         qbs[["game_id", "player_id", "player_name", "team_id", "opponent_team_id",
              "game_date", "season", "week", "home_away"]],
     )
-    cols = ["game_id", "player_id", "xgboost", "ensemble", "avg_pass_yds_last5"]
+    cols = ["game_id", "player_id", "avg_pass_yds_last5", *MODEL_NAMES]
     if feats.empty:
         feats = pd.DataFrame(columns=cols)
     else:
-        preds = predict_all(b["models"], feats[b["features"]])
-        feats["xgboost"], feats["ensemble"] = preds["xgboost"], preds["ensemble"]
+        for name, pred in predict_all(b["models"], feats[b["features"]]).items():
+            feats[name] = pred
     qbs = qbs.merge(feats[cols], on=["game_id", "player_id"], how="left")
 
     rows = []
@@ -171,7 +182,7 @@ def upcoming_picks(hours, mtime, min_ev, kelly):
             "matchup": f"{q.away} at {q.home}",
             "team": q.home if q.is_home else q.away,
             "qb": q.player_name, "books": len(books), "line": line,
-            "model": q.xgboost, "ensemble": q.ensemble, "last5": q.avg_pass_yds_last5,
+            "model": q.xgboost, "last5": q.avg_pass_yds_last5, **{k: getattr(q, k) for k in MODEL_NAMES},
             "edge": q.xgboost - line if has_model else np.nan,
             "lean": bet["side"] if bet else None,
             "best_book": bet["book"] if bet else None,
@@ -184,27 +195,58 @@ def upcoming_picks(hours, mtime, min_ev, kelly):
             "qualifies": bool(bet["qualifies"]) if bet else False,
         })
     table = pd.DataFrame(rows)
+    table["confident"] = confident(table)   # the pre-registered rule, at the consensus line
     # Bets in the window are placed together, so their combined stake is capped like one day's slate
     table["stake"] = cap_exposure(table["stake"], config.max_daily_exposure)
     return lines, table
 
 
+def walkforward_mtime():
+    return WALKFORWARD.stat().st_mtime if WALKFORWARD.exists() else None
+
+
+@st.cache_data(ttl=600, show_spinner="Scoring past games...")
+def fair_predictions(mtime, wf_mtime):
+    """Predictions for games the models never trained on: the walk-forward ones
+    where cached, plus the current models' for games after their training cutoff.
+    `source` says which."""
+    hist = history_predictions(mtime)
+    keys = ["game_id", "player_id"]
+    after = hist[hist["game_date"] > pd.Timestamp(bundle()["train_end"])].assign(source="current models")
+    if not wf_mtime:
+        return after.reset_index(drop=True)
+    wf = pd.read_csv(WALKFORWARD)[keys + list(MODEL_NAMES)]
+    walked = hist.drop(columns=list(MODEL_NAMES)).merge(wf, on=keys).assign(source="walk-forward")
+    after = after[~after.set_index(keys).index.isin(walked.set_index(keys).index)]
+    return pd.concat([walked, after], ignore_index=True)
+
+
 @st.cache_data(ttl=600, show_spinner="Loading closing lines...")
-def backtest_bets(mtime):
-    """Games after the training cutoff with a pregame line and a result (scripts/backtest.py)."""
-    b = bundle()
+def closing_lines():
+    """One closing line per QB-game, with prices (scripts/backtest.py)."""
     session = SessionLocal()
     try:
-        lines = load_closing_prop_lines(session)
+        return load_closing_prop_lines(session)
     finally:
         session.close()
+
+
+def backtest_bets(mtime, wf_mtime):
+    """Graded games (pregame line + result) the models never trained on, and how
+    many graded games there are in all."""
+    lines = closing_lines()
     if lines.empty:
         return pd.DataFrame(), 0
-    played = history_predictions(mtime)
-    bets = played.merge(lines, on=["game_id", "player_id"], how="inner")
-    total = len(bets)
-    bets = bets[bets["game_date"] > pd.Timestamp(b["train_end"])].reset_index(drop=True)
-    return bets, total
+    total = len(history_predictions(mtime).merge(lines, on=["game_id", "player_id"]))
+    bets = fair_predictions(mtime, wf_mtime).merge(lines, on=["game_id", "player_id"], how="inner")
+    return bets.sort_values(["game_date", "game_id"]).reset_index(drop=True), total
+
+
+def confident(df):
+    """The pre-registered confident-picks rule (scripts/weekly_report.py)."""
+    sides = np.sign(df[CONFIDENT_RULE["models"]].to_numpy() - df[["line"]].to_numpy())
+    return (((df["xgboost"] - df["line"]).abs() >= CONFIDENT_RULE["min_edge"])
+            & (np.abs(sides.sum(axis=1)) == len(CONFIDENT_RULE["models"]))).to_numpy()
 
 
 def american(price):
@@ -401,6 +443,136 @@ def page_picks():
     st.markdown(f'<p class="note">{DISCLAIMER}</p>', unsafe_allow_html=True)
 
 
+def graded_confident(bets):
+    """Confident picks among graded games: XGBoost's side, result and units at the closing price."""
+    sure = bets[confident(bets)].copy()
+    over = sure["xgboost"] > sure["line"]
+    y, line = sure["passing_yards"], sure["line"]
+    won = np.where(over, y > line, y < line)
+    sure["side"] = np.where(over, "OVER", "UNDER")
+    sure["edge"] = sure["xgboost"] - line
+    sure["result"] = np.where(y == line, "push", np.where(won, "win", "loss"))
+    price = np.where(over, sure["over_odds"], sure["under_odds"])
+    sure["units"] = np.select([sure["result"] == "win", sure["result"] == "loss"],
+                              [american_payout(price), -1.0], 0.0)
+    return sure
+
+
+def record_row(label, g):
+    w, l = int((g["result"] == "win").sum()), int((g["result"] == "loss").sum())
+    return {"": label, "Picks": len(g), "W-L": f"{w}-{l}", "Win rate": 100 * w / (w + l) if w + l else np.nan,
+            "Units": g["units"].sum(), "ROI": 100 * g["units"].sum() / len(g) if len(g) else np.nan}
+
+
+def page_confident():
+    require_models()
+    rule = CONFIDENT_RULE
+    with st.sidebar:
+        st.subheader("Filters")
+        hours = st.select_slider("Kickoff within", options=[24, 48, 72, 96, 120, 168], value=72,
+                                 format_func=lambda h: f"{h} hours" if h < 168 else "7 days", key="conf_hours")
+        bankroll = st.number_input("Bankroll (units)", min_value=1.0, value=100.0, step=10.0, key="conf_bank")
+
+    st.header("Most confident picks")
+    st.markdown(
+        f'<p class="summary">The games where the models agree most: XGBoost is at least {rule["min_edge"]:g} '
+        f'yards from the line <b>and</b> all four models pick the same side. This rule was registered on '
+        f'{pd.Timestamp(rule["registered"]):%b %d, %Y}, before any game it\'s judged on. In testing, '
+        'lines moved toward these picks after Friday (closing-line value, a real edge), but profit '
+        'isn\'t proven yet.</p>', unsafe_allow_html=True)
+
+    lines, picks = upcoming_picks(hours, model_mtime(), BetConfig.min_ev, BetConfig.kelly_multiplier)
+    st.subheader("This week")
+    sure = picks[picks["confident"]] if not picks.empty else picks
+    if picks.empty:
+        st.info(f"No stored prop lines for games kicking off in the next {hours} hours. Lines are saved by "
+                "the Friday 9am job, so check back after it runs or widen the kickoff window.")
+    elif sure.empty:
+        st.info(f"None of the {len(picks)} quarterbacks with lines in the next {hours} hours meet the rule.")
+    else:
+        sure = sure.reindex(sure["edge"].abs().sort_values(ascending=False).index)
+        st.caption(f"{len(sure)} of {len(picks)} quarterbacks with lines in the next {hours} hours, "
+                   "biggest gap between the model and the line first.")
+        st.markdown(LEGEND, unsafe_allow_html=True)
+        st.markdown("".join(pick_row(p, bankroll, BetConfig.min_ev) for _, p in sure.iterrows()),
+                    unsafe_allow_html=True)
+        st.dataframe(
+            sure[["qb", "matchup", "line", *rule["models"], "edge"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "qb": "QB", "matchup": "Game", "line": st.column_config.NumberColumn("Line", format="%.1f"),
+                **{m: st.column_config.NumberColumn(MODEL_NAMES[m], format="%.0f") for m in rule["models"]},
+                "edge": st.column_config.NumberColumn("XGBoost edge", format="%+.0f"),
+            })
+
+    st.subheader("Track record")
+    bets, _ = backtest_bets(model_mtime(), walkforward_mtime())
+    if bets.empty:
+        st.info("No graded games the models never trained on yet. Build the walk-forward predictions with "
+                "`python -m scripts.vs_closing_lines` to see how the rule did on past seasons.")
+    else:
+        hist = graded_confident(bets)
+        seasons = [record_row(str(season), g) for season, g in hist.groupby("season")]
+        seasons.append(record_row("All", hist))
+        st.dataframe(pd.DataFrame(seasons), hide_index=True, width="stretch", column_config={
+            "Win rate": st.column_config.NumberColumn(format="%.1f%%", help="About 52.4% breaks even at -110"),
+            "Units": st.column_config.NumberColumn(format="%+.2f"),
+            "ROI": st.column_config.NumberColumn(format="%.1f%%"),
+        })
+        st.caption(f"Every confident pick among {len(bets):,} past games, out of sample (models retrained "
+                   "week by week on earlier games only), flat 1-unit bets at each game's closing price. "
+                   "Live picks are made at Friday's line, which the backtest showed is easier to beat.")
+
+        curve = hist.sort_values(["game_date", "game_id"]).assign(
+            Pick=lambda d: np.arange(1, len(d) + 1), Units=lambda d: d["units"].cumsum())
+        line_chart = alt.Chart(curve).mark_line(color=OVER, strokeWidth=2.5).encode(
+            x=alt.X("Pick:Q", title="Confident pick number"), y=alt.Y("Units:Q", title="Running profit (units)"),
+            tooltip=[alt.Tooltip("game_date:T", title="Date"), alt.Tooltip("player_name:N", title="QB"),
+                     alt.Tooltip("Units:Q", format="+.1f")])
+        zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=MUTED, strokeDash=[3, 3]).encode(y="y:Q")
+        st.altair_chart((zero + line_chart).properties(height=260), width="stretch")
+
+        names = teams()
+        order = st.radio("Show", ["Most recent", "Biggest edges"], horizontal=True)
+        shown = (hist.sort_values(["game_date", "game_id"], ascending=False) if order == "Most recent"
+                 else hist.reindex(hist["edge"].abs().sort_values(ascending=False).index)).head(25)
+        st.dataframe(
+            shown.assign(game=shown["team_id"].map(names).fillna("?") + " vs "
+                         + shown["opponent_team_id"].map(names).fillna("?"))[
+                ["game_date", "player_name", "game", "line", "xgboost", "edge", "side",
+                 "passing_yards", "result", "units"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "game_date": st.column_config.DateColumn("Date", format="MMM D, YYYY"),
+                "player_name": "QB", "game": "Game",
+                "line": st.column_config.NumberColumn("Line", format="%.1f"),
+                "xgboost": st.column_config.NumberColumn("XGBoost", format="%.0f"),
+                "edge": st.column_config.NumberColumn("Edge", format="%+.0f"),
+                "side": "Pick", "passing_yards": st.column_config.NumberColumn("Actual", format="%.0f"),
+                "result": "Result", "units": st.column_config.NumberColumn("Units", format="%+.2f"),
+            })
+
+    graded = REPORTS / "graded_picks.csv"
+    live = pd.read_csv(graded) if graded.exists() else pd.DataFrame()
+    if "confident_pick" in live:
+        live = live[live["confident_pick"].astype(str) == "True"]
+    else:
+        live = live.iloc[0:0]
+    st.subheader("Live record")
+    if live.empty:
+        st.caption(f"No live confident picks graded yet. The weekly report starts counting games after "
+                   f"{pd.Timestamp(rule['registered']):%b %d, %Y}; see reports/weekly_results.md.")
+    else:
+        live = live.rename(columns={"xgboost_result": "result", "xgboost_units": "units"})
+        st.dataframe(pd.DataFrame([record_row("Since the rule was registered", live)]), hide_index=True,
+                     width="stretch", column_config={
+                         "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
+                         "Units": st.column_config.NumberColumn(format="%+.2f"),
+                         "ROI": st.column_config.NumberColumn(format="%.1f%%")})
+        st.caption("Graded each Friday by the weekly report at the Friday line (reports/weekly_results.md).")
+    st.markdown(f'<p class="note">{DISCLAIMER}</p>', unsafe_allow_html=True)
+
+
 def page_qb():
     require_models()
     b = bundle()
@@ -420,9 +592,14 @@ def page_qb():
         return
     qb_id, team_id = pick.player_id, pick.team_id
 
-    hist = history_predictions(model_mtime())
+    fair = fair_predictions(model_mtime(), walkforward_mtime())
+    lines = closing_lines()
     mine = games[(games["player_id"] == qb_id)].sort_values("game_date").tail(12).copy()
-    mine = mine.merge(hist[hist["player_id"] == qb_id][["game_id", "xgboost"]], on="game_id", how="left")
+    mine = mine.merge(fair[fair["player_id"] == qb_id][["game_id", "xgboost"]], on="game_id", how="left")
+    if not lines.empty:
+        mine = mine.merge(lines[lines["player_id"] == qb_id][["game_id", "consensus"]], on="game_id", how="left")
+    else:
+        mine["consensus"] = np.nan
     mine["opponent"] = mine["opponent_team_id"].map(names)
     mine["label"] = (mine["game_date"].dt.strftime("%b %d '%y").str.replace(" 0", " ")
                      + " vs " + mine["opponent"].fillna("?"))
@@ -434,22 +611,27 @@ def page_qb():
             st.info("No games on record.")
         else:
             x = alt.X("label:N", sort=None, title=None, axis=alt.Axis(labelAngle=-40, labelLimit=160, labelOverlap=False))
-            bars = alt.Chart(mine).mark_bar(color="#9FB3C8", size=22).encode(
+            bars = alt.Chart(mine).mark_bar(color="#9FB3C8").encode(
                 x=x, y=alt.Y("passing_yards:Q", title="Passing yards"),
                 tooltip=[alt.Tooltip("label:N", title="Game"), alt.Tooltip("passing_yards:Q", title="Actual"),
+                         alt.Tooltip("consensus:Q", title="Sportsbook line", format=".1f"),
                          alt.Tooltip("xgboost:Q", title="Model (pregame)", format=".0f")])
+            ticks = alt.Chart(mine.dropna(subset=["consensus"])).mark_tick(
+                color=GOLD, thickness=3).encode(x=x, y="consensus:Q")
             dots = alt.Chart(mine.dropna(subset=["xgboost"])).mark_point(
                 filled=True, size=90, color=INK, shape="diamond").encode(x=x, y="xgboost:Q")
-            st.altair_chart((bars + dots).properties(height=320), width="stretch")
-            train_end = pd.Timestamp(b["train_end"])
-            st.caption("Bars are actual passing yards. Diamonds are XGBoost's prediction from pregame "
-                       f"features (earlier games only). The current models were trained on games through "
-                       f"{train_end:%b %d, %Y}, results included, so those diamonds are fitted, not forecasts.")
+            st.altair_chart((bars + ticks + dots).properties(height=400), width="stretch")
+            st.caption("Bars are actual passing yards, gold ticks the sportsbook line at close, and diamonds "
+                       "what XGBoost predicted before the game from models that had never seen it "
+                       "(retrained week by week on earlier games only). Games without a diamond weren't "
+                       "scored that way.")
             scored = mine.dropna(subset=["xgboost"])
-            scored = scored[scored["game_date"] > train_end]
             if len(scored):
-                st.caption(f"Model's average miss on the {len(scored)} of these games it never trained on: "
-                           f"{(scored['xgboost'] - scored['passing_yards']).abs().mean():.0f} yards.")
+                miss = (scored["xgboost"] - scored["passing_yards"]).abs().mean()
+                lined = scored.dropna(subset=["consensus"])
+                vs_line = (f" (the line missed by {(lined['consensus'] - lined['passing_yards']).abs().mean():.0f} "
+                           f"on the same games)" if len(lined) == len(scored) else "")
+                st.caption(f"Model's average miss on these {len(scored)} games: {miss:.0f} yards{vs_line}.")
 
     with right:
         st.subheader("Predict a game")
@@ -527,47 +709,71 @@ def page_backtest():
     st.header("Backtest")
     st.markdown('<p class="summary">How the models would have done betting real pregame lines '
                 'on games they never trained on.</p>', unsafe_allow_html=True)
-    bets, total = backtest_bets(model_mtime())
+    wf_mtime = walkforward_mtime()
+    bets, total = backtest_bets(model_mtime(), wf_mtime)
     if bets.empty:
         if total:
-            st.info(f"{total} QB games have a pregame line and a result, but none are after the models' "
-                    f"training cutoff ({pd.Timestamp(b['train_end']).date()}). More weeks of lines will fix this.")
+            st.info(f"{total} QB games have a pregame line and a result, but the current models trained on "
+                    f"all of them (through {pd.Timestamp(b['train_end']).date()}). To score them fairly, build "
+                    "the walk-forward predictions once with `python -m scripts.vs_closing_lines` "
+                    "(retrains the models week by week; takes a few minutes), then refresh.")
         else:
             st.info("No QB games have both a stored pregame line and a final stat line yet. Lines are saved "
                     "by the weekly Friday job; results appear once that week's CFBD stats are ingested.")
         return
 
-    edge = st.slider("Only bet when the model and line differ by at least (yards)", 0, 60, 0, step=5)
+    c1, c2 = st.columns([2, 3])
+    seasons = sorted(bets["season"].unique())
+    season = c1.selectbox("Season", ["All"] + seasons, format_func=str)
+    edge = c2.slider("Only bet when the model and line differ by at least (yards)", 0, 60, 0, step=5,
+                     help="For exploring only. Picking the threshold that looks best here is overfitting: "
+                          "it will look worse on future games. The fair test is the pre-registered "
+                          "confident-picks rule (15 yards, all four models agree), fixed before these games "
+                          "were scored.")
+    if season != "All":
+        bets = bets[bets["season"] == season].reset_index(drop=True)
     y = bets["passing_yards"].to_numpy(float)
     line = bets["line"].to_numpy(float)
-    st.caption(f"{len(bets)} games from {bets['game_date'].min():%b %d, %Y} to {bets['game_date'].max():%b %d, %Y}, "
-               f"averaging {bets['books'].mean():.1f} books per line."
+    walked = int((bets["source"] == "walk-forward").sum())
+    st.caption(f"{len(bets):,} games from {bets['game_date'].min():%b %d, %Y} to {bets['game_date'].max():%b %d, %Y}, "
+               f"at each game's closing line (the book nearest the consensus of {bets['books'].mean():.1f} books "
+               f"on average). {walked:,} are scored walk-forward: every week predicted by models retrained only "
+               "on the games before it."
+               + (f" The other {len(bets) - walked:,} are newer than that and scored by the current models."
+                  if walked < len(bets) else "")
                + (" Small sample: win rate and ROI will swing a lot until more weeks are in." if len(bets) < 200 else ""))
 
-    rows = []
-    for key, name in MODEL_NAMES.items():
-        pred = bets[key].to_numpy(float)
-        r = simulate_betting_strategy(pred, bets, edge)
-        rows.append({"Model": name, "Avg miss (yds)": np.mean(np.abs(y - pred)),
-                     "Bets": r["total_bets"], "Win rate": r["win_rate"],
-                     "Profit (units)": r["total_profit"], "ROI": r["roi"]})
+    def result_row(name, pred, games):
+        r = simulate_betting_strategy(pred, games, edge)
+        return {"Model": name, "Avg miss (yds)": np.mean(np.abs(games["passing_yards"].to_numpy(float) - pred)),
+                "Bets": r["total_bets"], "Win rate": 100 * r["win_rate"],
+                "Profit (units)": r["total_profit"], "ROI": 100 * r["roi"]}
+
+    rows = [result_row(name, bets[key].to_numpy(float), bets) for key, name in MODEL_NAMES.items()]
+    sure = confident(bets)
+    if sure.any():
+        rows.append(result_row("Confident picks", bets.loc[sure, "xgboost"].to_numpy(float), bets[sure]))
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
         "Avg miss (yds)": st.column_config.NumberColumn(format="%.1f",
                                                         help="Mean absolute error vs. actual passing yards"),
-        "Win rate": st.column_config.NumberColumn(format="percent", help="About 52.4% breaks even at -110"),
+        "Win rate": st.column_config.NumberColumn(format="%.1f%%", help="About 52.4% breaks even at -110"),
         "Profit (units)": st.column_config.NumberColumn(format="%+.2f"),
-        "ROI": st.column_config.NumberColumn(format="percent"),
+        "ROI": st.column_config.NumberColumn(format="%.1f%%"),
     })
     st.caption(f"The sportsbook line itself misses by {np.mean(np.abs(y - line)):.1f} yards on average. "
                "That's the bar to beat: a model that doesn't miss by less than the line is unlikely "
-               "to find real value.")
+               "to find real value. Confident picks are the pre-registered rule: XGBoost at least "
+               f"{CONFIDENT_RULE['min_edge']:g} yards from the line and all four models on the same side. "
+               "About 52.4% wins break even at -110.")
 
     # Running profit, per model, in kickoff order (same rules as simulate_betting_strategy)
     order = bets.sort_values(["game_date", "game_id"]).index
     curves = []
-    for key, name in MODEL_NAMES.items():
+    for key, name in [*MODEL_NAMES.items(), ("xgboost", "Confident picks")]:
         e = bets[key].to_numpy(float) - line
         over, under = e > edge, e < -edge
+        if name == "Confident picks":
+            over, under = over & sure, under & sure
         win = (over & (y > line)) | (under & (y < line))
         lose = (over & (y < line)) | (under & (y > line))
         profit = np.where(win & over, american_payout(bets["over_odds"]), 0.0) \
@@ -580,12 +786,14 @@ def page_backtest():
     st.subheader("Running profit")
     chart = alt.Chart(curves).mark_line(strokeWidth=2).encode(
         x="Bet number:Q", y=alt.Y("Profit:Q", title="Units"),
-        color=alt.Color("Model:N", scale=alt.Scale(domain=list(MODEL_NAMES.values()),
-                        range=[INK, GOLD, "#6C8EAD", "#A3A9B3", "#8C6D9E"]), legend=alt.Legend(orient="top")),
-        strokeWidth=alt.condition(alt.datum.Model == "XGBoost", alt.value(3), alt.value(1.5)))
+        color=alt.Color("Model:N", scale=alt.Scale(domain=[*MODEL_NAMES.values(), "Confident picks"],
+                        range=[INK, GOLD, "#6C8EAD", "#A3A9B3", "#8C6D9E", OVER]), legend=LEGEND_TOP),
+        strokeWidth=alt.condition((alt.datum.Model == "XGBoost") | (alt.datum.Model == "Confident picks"),
+                                  alt.value(3), alt.value(1.5)))
     zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=MUTED, strokeDash=[3, 3]).encode(y="y:Q")
     st.altair_chart((zero + chart).properties(height=320), width="stretch")
-    st.caption("Flat 1-unit bets at each book's last pregame price; pushes return the stake.")
+    st.caption("Flat 1-unit bets at each game's closing price, in kickoff order; pushes return the stake. "
+               "Confident picks bet far fewer games, so their line is shorter.")
 
     st.subheader("Kelly bankroll")
     st.markdown('<p class="note">Bets only when expected value clears the minimum, sized as a fraction '
@@ -602,19 +810,19 @@ def page_backtest():
     summary, paths = [], []
     for key, name in MODEL_NAMES.items():
         log, k = simulate_bankroll(bets, key, from_bundle(b, key), config, start=start)
-        summary.append({"Model": name, "Bets": k["bets"], "Win rate": k["win_rate"], "Staked": k["staked"],
-                        "Profit": k["profit"], "ROI on stakes": k["roi"], "Final bankroll": k["final"],
-                        "Worst drawdown": k["max_drawdown"]})
+        summary.append({"Model": name, "Bets": k["bets"], "Win rate": 100 * k["win_rate"], "Staked": k["staked"],
+                        "Profit": k["profit"], "ROI on stakes": 100 * k["roi"], "Final bankroll": k["final"],
+                        "Worst drawdown": 100 * k["max_drawdown"]})
         if len(log):
             paths.append(pd.DataFrame({"Bet number": np.arange(0, len(log) + 1),
                                        "Bankroll": np.r_[start, log["bankroll"].to_numpy()], "Model": name}))
     st.dataframe(pd.DataFrame(summary), hide_index=True, width="stretch", column_config={
-        "Win rate": st.column_config.NumberColumn(format="percent"),
+        "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
         "Staked": st.column_config.NumberColumn(format="%.2f"),
         "Profit": st.column_config.NumberColumn(format="%+.2f"),
-        "ROI on stakes": st.column_config.NumberColumn(format="percent"),
+        "ROI on stakes": st.column_config.NumberColumn(format="%.1f%%"),
         "Final bankroll": st.column_config.NumberColumn(format="%.2f"),
-        "Worst drawdown": st.column_config.NumberColumn(format="percent",
+        "Worst drawdown": st.column_config.NumberColumn(format="%.1f%%",
                                                         help="Largest fall from a peak, measured at the end of each day"),
     })
     if paths:
@@ -622,7 +830,7 @@ def page_backtest():
         chart = alt.Chart(paths).mark_line(strokeWidth=2).encode(
             x="Bet number:Q", y=alt.Y("Bankroll:Q", title="Bankroll (units)", scale=alt.Scale(zero=False)),
             color=alt.Color("Model:N", scale=alt.Scale(domain=list(MODEL_NAMES.values()),
-                            range=[INK, GOLD, "#6C8EAD", "#A3A9B3", "#8C6D9E"]), legend=alt.Legend(orient="top")),
+                            range=[INK, GOLD, "#6C8EAD", "#A3A9B3", "#8C6D9E"]), legend=LEGEND_TOP),
             strokeWidth=alt.condition(alt.datum.Model == "XGBoost", alt.value(3), alt.value(1.5)))
         base = alt.Chart(pd.DataFrame({"y": [start]})).mark_rule(color=MUTED, strokeDash=[3, 3]).encode(y="y:Q")
         st.altair_chart((base + chart).properties(height=320), width="stretch")
@@ -631,8 +839,8 @@ def page_backtest():
     if "residuals" not in b:
         st.caption("This models file has no saved misses, so win chances use a bell curve. "
                    "Retrain on the Models & data page to use each model's real misses.")
-    st.caption("Win chances come from the models' misses on their training test set, which can overlap "
-               "these games, so treat this as an optimistic estimate.")
+    st.caption("Win chances come from the current models' misses on their held-out test set, which "
+               "overlaps the newest of these games, so treat this as an optimistic estimate.")
 
 
 def page_models():
@@ -676,7 +884,8 @@ def page_models():
         st.subheader("Database")
         counts = []
         with engine.connect() as c:
-            for t in ["games", "teams", "qb_game_stats", "qb_prop_lines", "game_lines", "odds", "ingestion_log"]:
+            for t in ["games", "teams", "qb_game_stats", "qb_prop_lines", "live_picks",
+                      "qb_prop_closing_lines", "game_lines", "odds", "ingestion_log"]:
                 counts.append({"Table": t, "Rows": c.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()})
             snap = c.execute(text("SELECT MAX(fetched_at) FROM qb_prop_lines")).scalar()
             latest_game = c.execute(text(
@@ -705,6 +914,7 @@ with st.sidebar:
 
 nav = st.navigation([
     st.Page(page_picks, title="This week", icon=":material/sports_football:", url_path="picks", default=True),
+    st.Page(page_confident, title="Confident picks", icon=":material/verified:", url_path="confident"),
     st.Page(page_qb, title="QB lookup", icon=":material/person_search:", url_path="qb"),
     st.Page(page_backtest, title="Backtest", icon=":material/query_stats:", url_path="backtest"),
     st.Page(page_models, title="Models & data", icon=":material/database:", url_path="models"),

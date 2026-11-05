@@ -223,3 +223,53 @@ With 2,262 closing lines, the answer for "bet the model on every game" is no.
 Closing-line value says the confident picks have a real but small edge (+2.5
 yards, p < 0.001); the open question is how to make it profitable after the
 books' cut.
+
+## Clean re-test with untouched settings (November 4, 2026): pre-registered
+
+**Why:** the XGBoost settings in `configs/xgboost_reg_params.json` were tuned
+on games through Nov 15, 2025, so they had already seen most of the 2024-26
+games the closing-line test and CLV scored. Walk-forward retraining hid the
+results from the model weights, but not from the choice of settings.
+
+**Plan, written before running anything:**
+1. Re-tune XGBoost with the same search (Optuna, 100 trials, 4-fold
+   time-series CV) on games before 2024-08-01 only
+   (`configs/xgboost_reg_params_pre2024.json`).
+2. Re-run the walk-forward predictions for all lined 2024-26 games with those
+   settings (separate cache, `data/raw/walkforward_preds_pre2024.csv`).
+3. Re-score the same pre-registered rules, unchanged: XGBoost on every game,
+   the confident picks (|XGBoost - line| >= 15 and all four models agree;
+   registered 2026-10-26) at closing prices, and the confident picks' CLV vs.
+   the Friday line (pass: mean CLV > 0, one-sided p < 0.05).
+4. Report the numbers whatever they are. No other settings, rules or
+   thresholds change. If the clean numbers are worse, the clean numbers are
+   the ones to believe.
+
+Still not clean (noted, not fixable without fresh seasons): the feature set
+and the confident-picks rule were chosen during October 2026 experiments
+whose test split included 2025-26 games. 2024 is the season furthest from
+those choices.
+
+**Result: the finding holds; the leak made no real difference.** The clean
+search picked almost the same settings (depth 2, learning rate 0.015 vs.
+0.018, 250 vs. 300 trees). Same 2,265 games, same rules:
+
+| | Old settings | Clean (tuned before 2024) |
+|---|---|---|
+| XGBoost, every game | 51.7%, -71.6 u | 51.2%, -90.4 u (fail) |
+| Confident picks, closing prices | 796 picks, 54.9%, +23.3 u | 794 picks, 54.9%, +23.5 u, p = 0.083 (fail) |
+| Confident picks: 2024 / 2025 / 2026 | 55.4% / 57.2% / 50.5% | 56.1% / 56.4% / 50.8% |
+| Confident-pick CLV vs. Friday line | +2.52 yds, p < 0.001 | **+2.66 yds, p < 0.001 (PASS)** |
+
+2024, the season furthest from every choice we made, is the strongest one
+(56.1%, +15.5 u), which is the opposite of what overfitting would show.
+Betting every game still loses, and profit on the confident picks is still
+not proven (p = 0.083). The edge, measured by closing-line value, is real.
+
+Not adopted, on purpose: the descriptive "20+ yards" slice passes on its own
+(56.6%, p = 0.018), but it's one of several slices looked at after the fact,
+and a near-identical rule (25+ yards) already failed the corrected profit
+test. Picking it now would be exactly the overfitting this test was meant to
+rule out. The live models keep their settings (tuned on more data, which is
+fine for predicting new games); the dashboard's backtest now uses the clean
+walk-forward predictions.

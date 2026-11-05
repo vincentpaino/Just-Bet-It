@@ -19,8 +19,13 @@ Pre-registered rules (2026-11-02, before running):
 
 Run from the project root:
     python -m scripts.vs_closing_lines
+    python -m scripts.vs_closing_lines --params configs/xgboost_reg_params_pre2024.json \
+        --cache data/raw/walkforward_preds_pre2024.csv    # XGBoost settings tuned before 2024
 """
+import argparse
+import json
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -46,14 +51,15 @@ def p_value(wins: int, n: int, p0: float = BREAK_EVEN) -> float:
     return float(binom.sf(wins - 1, n, p0))   # exact, and safe for thousands of bets
 
 
-def walk_forward(data: pd.DataFrame, lined: pd.DataFrame) -> pd.DataFrame:
+def walk_forward(data: pd.DataFrame, lined: pd.DataFrame, params: dict | None = None,
+                 cache: Path = CACHE) -> pd.DataFrame:
     """Out-of-sample predictions for every lined game, retraining before each week."""
-    if CACHE.exists():
-        cached = pd.read_csv(CACHE)
+    if cache.exists():
+        cached = pd.read_csv(cache)
         if set(zip(lined.game_id, lined.player_id)) <= set(zip(cached.game_id, cached.player_id)):
-            print(f"(using cached walk-forward predictions: {CACHE.relative_to(X.PROJECT_ROOT)})")
+            print(f"(using cached walk-forward predictions: {cache})")
             return cached
-    params = X.load_params()[0]
+    params = params or X.load_params()[0]
     rounds = lined.groupby(["season", "week"])["game_date"].min().sort_values()
     out = []
     for i, ((season, week), start) in enumerate(rounds.items(), start=1):
@@ -68,8 +74,8 @@ def walk_forward(data: pd.DataFrame, lined: pd.DataFrame) -> pd.DataFrame:
         if i % 10 == 0 or i == len(rounds):
             print(f"  walk-forward: {i}/{len(rounds)} weeks")
     result = pd.concat(out, ignore_index=True)
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    result.to_csv(CACHE, index=False)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(cache, index=False)
     return result
 
 
@@ -87,6 +93,12 @@ def bet_report(label: str, pred, games: pd.DataFrame, mask=None):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Walk-forward models vs. closing lines")
+    parser.add_argument("--params", type=Path, help="XGBoost settings file (default: configs/xgboost_reg_params.json)")
+    parser.add_argument("--cache", type=Path, default=CACHE, help="Walk-forward prediction cache")
+    args = parser.parse_args()
+    params = json.loads(args.params.read_text()) if args.params else None
+
     data = X.filter_trainable(X.build_features(X.load_qb_games()))
     session = SessionLocal()
     try:
@@ -98,7 +110,7 @@ def main():
     print(f"{len(lined):,} graded QB-games with a pregame closing line ({lined.game_date.min().date()} "
           f"to {lined.game_date.max().date()}); by season: {lined.groupby('season').size().to_dict()}")
 
-    preds = walk_forward(data, lined)
+    preds = walk_forward(data, lined, params, args.cache)
     g = lined.merge(preds, on=["game_id", "player_id"], how="inner")
     y = g["passing_yards"].to_numpy(dtype=float)
 

@@ -20,8 +20,11 @@ p < 0.05. Profit/loss betting at Friday prices is reported too.
 
 Run from the project root (after scripts.vs_closing_lines has cached predictions):
     python -m scripts.clv
+    python -m scripts.clv --preds data/raw/walkforward_preds_pre2024.csv
 """
+import argparse
 import sys
+from pathlib import Path
 from datetime import timedelta
 
 import numpy as np
@@ -63,6 +66,10 @@ def snapshot(d: pd.DataFrame, start, end) -> pd.DataFrame:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Closing-line value of the walk-forward picks")
+    parser.add_argument("--preds", type=Path, default=PREDS, help="Walk-forward prediction cache")
+    args = parser.parse_args()
+
     d = book_lines()
     friday = d["start_time"].map(friday_9am_before)
     fri = snapshot(d, friday - timedelta(hours=2), friday + timedelta(hours=2))
@@ -73,7 +80,7 @@ def main():
                                    season=("season", "first"), actual=("actual", "first"))
              .join(close.groupby(keys).agg(close_line=("line", "median")), how="inner")
              .reset_index())
-    preds = pd.read_csv(PREDS)
+    preds = pd.read_csv(args.preds)
     games = games.merge(preds, on=keys, how="inner")
     print(f"{len(games):,} graded QB-games with a Friday-9am snapshot, a closing snapshot and an "
           f"out-of-sample prediction; by season: {games.groupby('season').size().to_dict()}")
