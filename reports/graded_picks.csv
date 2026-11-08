@@ -1,58 +1,119 @@
-season,week,game_date,game_id,player_id,qb,team,opponent,sportsbook,line,over_odds,under_odds,books,actual,xgboost_pred,xgboost_pick,xgboost_result,xgboost_units,ensemble_pred,ensemble_pick,ensemble_result,ensemble_units,model_trained_through,model_features,graded_at
-2026,8,2026-10-22,878,5153978,Camden Coleman,James Madison,App State,bovada,178.5,-115.0,-115.0,2,232.0,213.8,OVER,win,0.87,214.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-22,877,5138131,Deshawn Purdie,Liberty,Kennesaw State,betonlineag,173.5,-114.0,-114.0,3,176.0,192.5,OVER,win,0.877,185.2,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-22,879,5075800,Emory Williams,East Carolina,Memphis,bovada,174.5,-115.0,-115.0,3,61.0,179.5,OVER,loss,-1.0,177.4,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-22,879,5165807,Marcus Stokes,Memphis,East Carolina,betonlineag,227.5,-114.0,-114.0,3,320.0,238.6,OVER,win,0.877,239.6,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-22,877,4870645,Rickie Collins,Kennesaw State,Liberty,betonlineag,210.5,-114.0,-114.0,3,124.0,214.5,OVER,loss,-1.0,212.8,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,882,5224011,Baylor Hayes,Tulsa,Army,betonlineag,225.5,-114.0,-114.0,3,262.0,217.7,UNDER,loss,-1.0,218.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,880,4685696,Beau Pribula,Virginia,Duke,betonlineag,179.5,-112.0,-115.0,3,158.0,199.2,OVER,loss,-1.0,198.3,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,884,5079301,CJ Bailey,NC State,Stanford,betonlineag,267.5,-112.0,-115.0,3,256.0,256.0,UNDER,win,0.87,252.7,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,882,5150297,Cale Hellums,Army,Tulsa,bovada,78.5,-115.0,-115.0,3,64.0,128.9,OVER,loss,-1.0,127.2,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,884,4878681,Davis Warren,Stanford,NC State,bovada,244.5,-115.0,-115.0,3,303.0,222.7,UNDER,loss,-1.0,225.9,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,881,5079619,Kalieb Osborne,UConn,Massachusetts,betonlineag,233.5,-114.0,-114.0,3,173.0,210.1,UNDER,win,0.877,205.3,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,883,4838536,Tyler Hughes,Wyoming,Air Force,bovada,132.5,-115.0,-115.0,3,113.0,169.2,OVER,loss,-1.0,165.8,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-23,880,4694149,Walker Eget,Duke,Virginia,betonlineag,192.5,-112.0,-115.0,3,211.0,209.8,OVER,win,0.893,215.0,OVER,win,0.893,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,912,5075805,Aidan Chiles,Northwestern,Rutgers,bovada,252.5,-115.0,-115.0,3,219.0,223.4,UNDER,win,0.87,227.9,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,888,5191162,Alberto Mendoza,Georgia Tech,Boston College,bovada,227.5,-115.0,-115.0,3,186.0,238.9,OVER,loss,-1.0,243.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,898,4870906,Arch Manning,Texas,Ole Miss,betonlineag,238.5,-114.0,-114.0,3,212.0,212.4,UNDER,win,0.877,212.9,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,889,5141367,Bear Bachmeier,BYU,UCF,betonlineag,220.5,-114.0,-114.0,3,257.0,218.6,UNDER,loss,-1.0,216.8,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,905,4592532,Billy Edwards,North Carolina,Syracuse,betonlineag,204.5,-112.0,-115.0,2,271.0,206.6,OVER,win,0.893,207.7,OVER,win,0.893,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,921,4880272,Byrum Brown,Auburn,LSU,bovada,180.5,-115.0,-115.0,3,160.0,199.2,OVER,loss,-1.0,207.7,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,914,5125715,Colton Joseph,Wisconsin,USC,betonlineag,180.5,-114.0,-114.0,3,58.0,207.1,OVER,loss,-1.0,208.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,895,4685574,Conner Weigman,Houston,Utah,bovada,232.5,-115.0,-115.0,2,282.0,249.0,OVER,win,0.87,246.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,906,5079555,D.J. Lagway,Baylor,Kansas,bovada,260.5,-115.0,-115.0,3,236.0,230.0,UNDER,win,0.87,237.0,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,909,5121169,Darian Mensah,Miami,Pittsburgh,bovada,258.5,-115.0,-115.0,3,387.0,263.9,OVER,win,0.87,279.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,895,5105849,Devon Dampier,Utah,Houston,bovada,232.5,-115.0,-115.0,2,204.0,235.7,OVER,loss,-1.0,244.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,904,5144959,Drake Lindsey,Minnesota,Iowa,betonlineag,204.5,-114.0,-114.0,3,137.0,218.5,OVER,loss,-1.0,224.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,900,5219834,Drew Mestemaker,Oklahoma State,Colorado,bovada,290.5,-115.0,-115.0,3,386.0,290.3,UNDER,loss,-1.0,301.8,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,910,5079572,Dylan Raiola,Oregon,Illinois,bovada,222.5,-115.0,-115.0,3,246.0,177.2,UNDER,loss,-1.0,201.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,901,5144078,Ethan Grunkemeyer,Virginia Tech,Clemson,bovada,249.5,-115.0,-115.0,2,156.0,246.4,UNDER,win,0.87,239.5,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,892,5141571,George MacIntyre,Tennessee,South Carolina,betonlineag,192.5,-114.0,-114.0,3,136.0,203.8,OVER,loss,-1.0,207.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,909,4714300,Holden Geriner,Pittsburgh,Miami,betonlineag,167.5,-110.0,-118.0,1,268.0,174.6,OVER,win,0.909,179.5,OVER,win,0.909,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,900,5079771,Isaac Wilson,Colorado,Oklahoma State,bovada,212.5,-115.0,-115.0,3,280.0,207.7,UNDER,loss,-1.0,204.3,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,906,5079604,Isaiah Marshall,Kansas,Baylor,bovada,218.5,-115.0,-115.0,3,212.0,205.4,UNDER,win,0.87,201.3,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,907,4685345,JC French,Cincinnati,Texas Tech,betonlineag,210.5,-114.0,-114.0,3,172.0,238.9,OVER,loss,-1.0,251.5,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,908,5083569,Jaden Craig,TCU,West Virginia,betonlineag,292.5,-111.0,-116.0,3,372.0,265.4,UNDER,loss,-1.0,268.6,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,890,5158948,Jared Curtis,Vanderbilt,Kentucky,betonlineag,225.5,-114.0,-114.0,3,247.0,230.6,OVER,win,0.877,230.1,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,887,5164313,Jaron-Keawe Sagapolutele,California,SMU,bovada,231.5,-115.0,-115.0,3,265.0,207.5,UNDER,loss,-1.0,223.7,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,914,4685454,Jayden Maiava,USC,Wisconsin,bovada,253.5,-115.0,-115.0,3,258.0,249.8,UNDER,loss,-1.0,251.4,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,891,5080403,Jaylen Raynor,Iowa State,Arizona,bovada,180.5,-115.0,-115.0,2,106.0,184.8,OVER,loss,-1.0,194.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,904,5121030,Jeremy Hecklinski,Iowa,Minnesota,betonlineag,182.5,-112.0,-115.0,3,62.0,149.5,UNDER,win,0.87,159.8,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,896,4915980,John Mateer,Oklahoma,Mississippi State,bovada,226.5,-115.0,-115.0,3,283.0,231.0,OVER,win,0.87,233.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,911,4685401,Josh Hoover,Indiana,Michigan,betonlineag,210.5,-114.0,-114.0,2,81.0,225.7,OVER,loss,-1.0,233.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,902,5141629,Keelon Russell,Alabama,Texas A&M,betonlineag,250.5,-114.0,-114.0,3,311.0,233.4,UNDER,loss,-1.0,230.9,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,890,4918099,Kenny Minchey,Kentucky,Vanderbilt,betonlineag,240.5,-114.0,-114.0,3,203.0,219.8,UNDER,win,0.877,226.6,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,887,5084084,Kevin Jennings,SMU,California,bovada,280.5,-115.0,-115.0,3,223.0,270.0,UNDER,win,0.87,280.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,889,5085337,Keyone Jenkins,UCF,BYU,betonlineag,190.5,-114.0,-114.0,3,293.0,200.0,OVER,win,0.877,209.1,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,892,4875127,Lanorris Sellers,South Carolina,Tennessee,betonlineag,238.5,-114.0,-114.0,3,210.0,204.3,UNDER,win,0.877,212.5,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,924,4870513,Maddux Madsen,Boise State,Washington State,betonlineag,207.5,-114.0,-114.0,3,149.0,215.6,OVER,loss,-1.0,223.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,902,4870971,Marcel Reed,Texas A&M,Alabama,betonlineag,168.5,-114.0,-114.0,3,163.0,194.9,OVER,loss,-1.0,198.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,888,5307005,Mason McKenzie,Boston College,Georgia Tech,bovada,203.5,-115.0,-115.0,3,101.0,204.8,OVER,loss,-1.0,202.5,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,908,5079465,Michael Hawkins Jr.,West Virginia,TCU,bovada,173.5,-115.0,-115.0,3,79.0,197.8,OVER,loss,-1.0,201.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,886,4597499,Mikey Keene,Arizona State,Kansas State,betonlineag,215.5,-114.0,-114.0,3,160.0,231.9,OVER,loss,-1.0,244.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,928,5087156,Nathan Hayes,North Dakota State,New Mexico,betonlineag,153.5,-114.0,-114.0,3,198.0,192.9,OVER,win,0.877,188.6,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,891,4801717,Noah Fifita,Arizona,Iowa State,bovada,260.5,-115.0,-115.0,2,308.0,263.1,OVER,win,0.87,271.7,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,921,5078810,Sam Leavitt,LSU,Auburn,bovada,256.5,-115.0,-115.0,3,387.0,239.2,UNDER,loss,-1.0,242.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,901,5159078,Tait Reynolds,Clemson,Virginia Tech,bovada,205.5,-115.0,-115.0,2,153.0,212.0,OVER,loss,-1.0,210.5,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,898,4911529,Trinidad Chambliss,Ole Miss,Texas,bovada,241.5,-115.0,-115.0,3,250.0,246.0,OVER,win,0.87,247.6,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27
-2026,8,2026-10-24,907,5126468,Will Hammond,Texas Tech,Cincinnati,betonlineag,230.5,-114.0,-114.0,3,227.0,221.5,UNDER,win,0.877,225.0,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27
+season,week,game_date,game_id,player_id,qb,team,opponent,sportsbook,line,over_odds,under_odds,books,actual,xgboost_pred,xgboost_pick,xgboost_result,xgboost_units,ensemble_pred,ensemble_pick,ensemble_result,ensemble_units,model_trained_through,model_features,graded_at,confident_pick
+2026,8,2026-10-22,878,5153978,Camden Coleman,James Madison,App State,bovada,178.5,-115.0,-115.0,2,232.0,213.8,OVER,win,0.87,214.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-22,877,5138131,Deshawn Purdie,Liberty,Kennesaw State,betonlineag,173.5,-114.0,-114.0,3,176.0,192.5,OVER,win,0.877,185.2,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-22,879,5075800,Emory Williams,East Carolina,Memphis,bovada,174.5,-115.0,-115.0,3,61.0,179.5,OVER,loss,-1.0,177.4,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-22,879,5165807,Marcus Stokes,Memphis,East Carolina,betonlineag,227.5,-114.0,-114.0,3,320.0,238.6,OVER,win,0.877,239.6,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-22,877,4870645,Rickie Collins,Kennesaw State,Liberty,betonlineag,210.5,-114.0,-114.0,3,124.0,214.5,OVER,loss,-1.0,212.8,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,882,5224011,Baylor Hayes,Tulsa,Army,betonlineag,225.5,-114.0,-114.0,3,262.0,217.7,UNDER,loss,-1.0,218.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,880,4685696,Beau Pribula,Virginia,Duke,betonlineag,179.5,-112.0,-115.0,3,158.0,199.2,OVER,loss,-1.0,198.3,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,884,5079301,CJ Bailey,NC State,Stanford,betonlineag,267.5,-112.0,-115.0,3,256.0,256.0,UNDER,win,0.87,252.7,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,882,5150297,Cale Hellums,Army,Tulsa,bovada,78.5,-115.0,-115.0,3,64.0,128.9,OVER,loss,-1.0,127.2,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,884,4878681,Davis Warren,Stanford,NC State,bovada,244.5,-115.0,-115.0,3,303.0,222.7,UNDER,loss,-1.0,225.9,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,881,5079619,Kalieb Osborne,UConn,Massachusetts,betonlineag,233.5,-114.0,-114.0,3,173.0,210.1,UNDER,win,0.877,205.3,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,883,4838536,Tyler Hughes,Wyoming,Air Force,bovada,132.5,-115.0,-115.0,3,113.0,169.2,OVER,loss,-1.0,165.8,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-23,880,4694149,Walker Eget,Duke,Virginia,betonlineag,192.5,-112.0,-115.0,3,211.0,209.8,OVER,win,0.893,215.0,OVER,win,0.893,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,912,5075805,Aidan Chiles,Northwestern,Rutgers,bovada,252.5,-115.0,-115.0,3,219.0,223.4,UNDER,win,0.87,227.9,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,888,5191162,Alberto Mendoza,Georgia Tech,Boston College,bovada,227.5,-115.0,-115.0,3,186.0,238.9,OVER,loss,-1.0,243.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,898,4870906,Arch Manning,Texas,Ole Miss,betonlineag,238.5,-114.0,-114.0,3,212.0,212.4,UNDER,win,0.877,212.9,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,889,5141367,Bear Bachmeier,BYU,UCF,betonlineag,220.5,-114.0,-114.0,3,257.0,218.6,UNDER,loss,-1.0,216.8,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,905,4592532,Billy Edwards,North Carolina,Syracuse,betonlineag,204.5,-112.0,-115.0,2,271.0,206.6,OVER,win,0.893,207.7,OVER,win,0.893,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,921,4880272,Byrum Brown,Auburn,LSU,bovada,180.5,-115.0,-115.0,3,160.0,199.2,OVER,loss,-1.0,207.7,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,914,5125715,Colton Joseph,Wisconsin,USC,betonlineag,180.5,-114.0,-114.0,3,58.0,207.1,OVER,loss,-1.0,208.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,895,4685574,Conner Weigman,Houston,Utah,bovada,232.5,-115.0,-115.0,2,282.0,249.0,OVER,win,0.87,246.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,906,5079555,D.J. Lagway,Baylor,Kansas,bovada,260.5,-115.0,-115.0,3,236.0,230.0,UNDER,win,0.87,237.0,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,909,5121169,Darian Mensah,Miami,Pittsburgh,bovada,258.5,-115.0,-115.0,3,387.0,263.9,OVER,win,0.87,279.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,895,5105849,Devon Dampier,Utah,Houston,bovada,232.5,-115.0,-115.0,2,204.0,235.7,OVER,loss,-1.0,244.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,904,5144959,Drake Lindsey,Minnesota,Iowa,betonlineag,204.5,-114.0,-114.0,3,137.0,218.5,OVER,loss,-1.0,224.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,900,5219834,Drew Mestemaker,Oklahoma State,Colorado,bovada,290.5,-115.0,-115.0,3,386.0,290.3,UNDER,loss,-1.0,301.8,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,910,5079572,Dylan Raiola,Oregon,Illinois,bovada,222.5,-115.0,-115.0,3,246.0,177.2,UNDER,loss,-1.0,201.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,901,5144078,Ethan Grunkemeyer,Virginia Tech,Clemson,bovada,249.5,-115.0,-115.0,2,156.0,246.4,UNDER,win,0.87,239.5,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,892,5141571,George MacIntyre,Tennessee,South Carolina,betonlineag,192.5,-114.0,-114.0,3,136.0,203.8,OVER,loss,-1.0,207.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,909,4714300,Holden Geriner,Pittsburgh,Miami,betonlineag,167.5,-110.0,-118.0,1,268.0,174.6,OVER,win,0.909,179.5,OVER,win,0.909,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,900,5079771,Isaac Wilson,Colorado,Oklahoma State,bovada,212.5,-115.0,-115.0,3,280.0,207.7,UNDER,loss,-1.0,204.3,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,906,5079604,Isaiah Marshall,Kansas,Baylor,bovada,218.5,-115.0,-115.0,3,212.0,205.4,UNDER,win,0.87,201.3,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,907,4685345,JC French,Cincinnati,Texas Tech,betonlineag,210.5,-114.0,-114.0,3,172.0,238.9,OVER,loss,-1.0,251.5,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,908,5083569,Jaden Craig,TCU,West Virginia,betonlineag,292.5,-111.0,-116.0,3,372.0,265.4,UNDER,loss,-1.0,268.6,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,890,5158948,Jared Curtis,Vanderbilt,Kentucky,betonlineag,225.5,-114.0,-114.0,3,247.0,230.6,OVER,win,0.877,230.1,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,887,5164313,Jaron-Keawe Sagapolutele,California,SMU,bovada,231.5,-115.0,-115.0,3,265.0,207.5,UNDER,loss,-1.0,223.7,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,914,4685454,Jayden Maiava,USC,Wisconsin,bovada,253.5,-115.0,-115.0,3,258.0,249.8,UNDER,loss,-1.0,251.4,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,891,5080403,Jaylen Raynor,Iowa State,Arizona,bovada,180.5,-115.0,-115.0,2,106.0,184.8,OVER,loss,-1.0,194.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,904,5121030,Jeremy Hecklinski,Iowa,Minnesota,betonlineag,182.5,-112.0,-115.0,3,62.0,149.5,UNDER,win,0.87,159.8,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,896,4915980,John Mateer,Oklahoma,Mississippi State,bovada,226.5,-115.0,-115.0,3,283.0,231.0,OVER,win,0.87,233.5,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,911,4685401,Josh Hoover,Indiana,Michigan,betonlineag,210.5,-114.0,-114.0,2,81.0,225.7,OVER,loss,-1.0,233.0,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,902,5141629,Keelon Russell,Alabama,Texas A&M,betonlineag,250.5,-114.0,-114.0,3,311.0,233.4,UNDER,loss,-1.0,230.9,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,890,4918099,Kenny Minchey,Kentucky,Vanderbilt,betonlineag,240.5,-114.0,-114.0,3,203.0,219.8,UNDER,win,0.877,226.6,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,887,5084084,Kevin Jennings,SMU,California,bovada,280.5,-115.0,-115.0,3,223.0,270.0,UNDER,win,0.87,280.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,889,5085337,Keyone Jenkins,UCF,BYU,betonlineag,190.5,-114.0,-114.0,3,293.0,200.0,OVER,win,0.877,209.1,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,892,4875127,Lanorris Sellers,South Carolina,Tennessee,betonlineag,238.5,-114.0,-114.0,3,210.0,204.3,UNDER,win,0.877,212.5,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,924,4870513,Maddux Madsen,Boise State,Washington State,betonlineag,207.5,-114.0,-114.0,3,149.0,215.6,OVER,loss,-1.0,223.9,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,902,4870971,Marcel Reed,Texas A&M,Alabama,betonlineag,168.5,-114.0,-114.0,3,163.0,194.9,OVER,loss,-1.0,198.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,888,5307005,Mason McKenzie,Boston College,Georgia Tech,bovada,203.5,-115.0,-115.0,3,101.0,204.8,OVER,loss,-1.0,202.5,UNDER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,908,5079465,Michael Hawkins Jr.,West Virginia,TCU,bovada,173.5,-115.0,-115.0,3,79.0,197.8,OVER,loss,-1.0,201.6,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,886,4597499,Mikey Keene,Arizona State,Kansas State,betonlineag,215.5,-114.0,-114.0,3,160.0,231.9,OVER,loss,-1.0,244.1,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,928,5087156,Nathan Hayes,North Dakota State,New Mexico,betonlineag,153.5,-114.0,-114.0,3,198.0,192.9,OVER,win,0.877,188.6,OVER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,891,4801717,Noah Fifita,Arizona,Iowa State,bovada,260.5,-115.0,-115.0,2,308.0,263.1,OVER,win,0.87,271.7,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,921,5078810,Sam Leavitt,LSU,Auburn,bovada,256.5,-115.0,-115.0,3,387.0,239.2,UNDER,loss,-1.0,242.2,UNDER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,901,5159078,Tait Reynolds,Clemson,Virginia Tech,bovada,205.5,-115.0,-115.0,2,153.0,212.0,OVER,loss,-1.0,210.5,OVER,loss,-1.0,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,898,4911529,Trinidad Chambliss,Ole Miss,Texas,bovada,241.5,-115.0,-115.0,3,250.0,246.0,OVER,win,0.87,247.6,OVER,win,0.87,2025-11-08,17,2026-10-26 13:27,
+2026,8,2026-10-24,907,5126468,Will Hammond,Texas Tech,Cincinnati,betonlineag,230.5,-114.0,-114.0,3,227.0,221.5,UNDER,win,0.877,225.0,UNDER,win,0.877,2025-11-08,17,2026-10-26 13:27,
+2026,10,2026-11-03,985,5388435,Caleb Heavner,Miami (OH),Buffalo,bovada,196.5,-115.0,-115.0,3,154.0,172.3,UNDER,win,0.87,167.0,UNDER,win,0.87,2026-10-31,20,2026-11-06 12:29,True
+2026,10,2026-11-03,985,5222591,Jason Wright,Buffalo,Miami (OH),betonlineag,149.5,-114.0,-114.0,3,358.0,160.6,OVER,win,0.877,159.6,OVER,win,0.877,2026-10-31,20,2026-11-06 12:29,False
+2026,10,2026-11-03,986,5228762,Nick Poulos,Ohio,Akron,betonlineag,202.5,-114.0,-114.0,3,197.0,199.8,UNDER,win,0.877,196.1,UNDER,win,0.877,2026-10-31,20,2026-11-06 12:29,False
+2026,10,2026-11-06,994,5044387,Anthony Colandrea,Nebraska,Illinois,betonlineag,227.5,-114.0,-114.0,3,284.0,228.4,OVER,win,0.877,232.8,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,992,5144078,Ethan Grunkemeyer,Virginia Tech,SMU,betonlineag,247.5,-112.0,-115.0,4,291.0,237.4,UNDER,loss,-1.0,232.6,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,996,5083569,Jaden Craig,TCU,Arizona,bovada,217.5,-115.0,-115.0,3,232.0,214.7,UNDER,loss,-1.0,212.4,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,994,4795295,Katin Houser,Illinois,Nebraska,betonlineag,220.5,-114.0,-114.0,3,292.0,219.9,UNDER,loss,-1.0,225.5,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,992,5084084,Kevin Jennings,SMU,Virginia Tech,betmgm,277.5,-115.0,-115.0,4,350.0,265.8,UNDER,loss,-1.0,271.0,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,993,4433829,Mitch Griffis,East Carolina,South Florida,betonlineag,164.5,-114.0,-114.0,3,48.0,168.4,OVER,loss,-1.0,168.1,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-06,996,4801717,Noah Fifita,Arizona,TCU,bovada,276.5,-115.0,-115.0,3,313.0,270.6,UNDER,loss,-1.0,268.0,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1009,4911929,Alonza Barnett,UCF,Kansas,betonlineag,200.5,-114.0,-114.0,2,251.0,183.3,UNDER,loss,-1.0,180.2,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1013,4870906,Arch Manning,Texas,Missouri,bovada,207.5,-115.0,-115.0,3,297.0,196.3,UNDER,loss,-1.0,201.9,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1024,4838679,Ashton Daniels,Florida State,Boston College,betonlineag,227.5,-114.0,-114.0,3,178.0,230.9,OVER,loss,-1.0,224.4,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1013,5141684,Austin Simmons,Missouri,Texas,betonlineag,202.5,-114.0,-114.0,3,252.0,211.0,OVER,win,0.877,206.8,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,999,5141367,Bear Bachmeier,BYU,Utah,betonlineag,217.5,-114.0,-114.0,3,272.0,199.8,UNDER,loss,-1.0,204.1,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1034,4592532,Billy Edwards,North Carolina,UConn,betonlineag,252.5,-114.0,-114.0,3,255.0,239.2,UNDER,loss,-1.0,238.4,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1046,5148803,Brad Jackson,Texas State,Oregon State,betonlineag,248.5,-114.0,-114.0,3,214.0,267.0,OVER,loss,-1.0,259.5,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1046,5212654,Braden Atkinson,Oregon State,Texas State,betonlineag,355.5,-114.0,-114.0,3,192.0,317.3,UNDER,win,0.877,329.7,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1021,4880272,Byrum Brown,Auburn,Arkansas,bovada,229.5,-115.0,-115.0,3,180.0,209.8,UNDER,win,0.87,219.8,UNDER,win,0.87,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1044,5079369,C.J. Carr,Notre Dame,Miami,betonlineag,245.5,-114.0,-114.0,3,319.0,231.0,UNDER,loss,-1.0,230.6,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1002,5079301,CJ Bailey,NC State,Duke,betonlineag,233.5,-112.0,-115.0,3,123.0,225.9,UNDER,win,0.87,226.5,UNDER,win,0.87,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1043,5150297,Cale Hellums,Army,Air Force,betonlineag,72.5,-114.0,-114.0,3,38.0,134.9,OVER,loss,-1.0,112.7,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1007,4685574,Conner Weigman,Houston,Cincinnati,betonlineag,259.5,-114.0,-114.0,3,227.0,250.6,UNDER,win,0.877,248.7,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1004,5079555,D.J. Lagway,Baylor,Iowa State,betonlineag,266.5,-114.0,-114.0,3,229.0,258.1,UNDER,win,0.877,252.5,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1044,5121169,Darian Mensah,Miami,Notre Dame,betonlineag,223.5,-114.0,-114.0,3,276.0,230.1,OVER,win,0.877,239.9,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1026,5079653,Demond Williams Jr.,Washington,Penn State,betonlineag,223.5,-114.0,-114.0,3,172.0,197.6,UNDER,win,0.877,208.0,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,999,5105849,Devon Dampier,Utah,BYU,bovada,216.5,-115.0,-115.0,3,177.0,216.2,UNDER,win,0.87,221.9,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1020,5144959,Drake Lindsey,Minnesota,UCLA,bovada,187.5,-115.0,-115.0,3,205.0,181.5,UNDER,loss,-1.0,185.4,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1005,5219834,Drew Mestemaker,Oklahoma State,Kansas State,betonlineag,284.5,-114.0,-114.0,3,313.0,290.9,OVER,win,0.877,296.9,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1016,5079572,Dylan Raiola,Oregon,Ohio State,betonlineag,216.5,-114.0,-114.0,3,257.0,190.0,UNDER,loss,-1.0,198.3,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1008,5141571,George MacIntyre,Tennessee,Kentucky,betonlineag,196.5,-114.0,-114.0,3,125.0,205.9,OVER,loss,-1.0,200.3,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1012,4685578,Gunner Stockton,Georgia,Ole Miss,betonlineag,211.5,-112.0,-115.0,3,186.0,219.0,OVER,loss,-1.0,222.6,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1023,5089314,Hank Brown,Iowa,Northwestern,betonlineag,190.5,-114.0,-114.0,2,126.0,191.6,OVER,loss,-1.0,196.8,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1041,5079443,Hauss Hejny,Colorado State,Boise State,betonlineag,248.5,-114.0,-114.0,3,253.0,224.9,UNDER,loss,-1.0,226.0,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1014,5079771,Isaac Wilson,Colorado,Arizona State,betonlineag,214.5,-114.0,-114.0,3,248.0,205.2,UNDER,loss,-1.0,203.9,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1009,5079604,Isaiah Marshall,Kansas,UCF,betonlineag,203.5,-114.0,-114.0,2,210.0,199.4,UNDER,loss,-1.0,201.9,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1007,4685345,JC French,Cincinnati,Houston,betonlineag,225.5,-114.0,-114.0,3,217.0,215.7,UNDER,win,0.877,217.9,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1047,4870607,Jackson Arnold,UNLV,Wyoming,betonlineag,209.5,-114.0,-114.0,3,83.0,199.7,UNDER,win,0.877,197.9,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1032,5158948,Jared Curtis,Vanderbilt,Mississippi State,betonlineag,239.5,-112.0,-115.0,3,168.0,212.7,UNDER,win,0.87,210.1,UNDER,win,0.87,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1004,5080403,Jaylen Raynor,Iowa State,Baylor,betonlineag,181.5,-114.0,-114.0,3,256.0,189.4,OVER,win,0.877,199.8,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1010,4915980,John Mateer,Oklahoma,Florida,betonlineag,194.5,-114.0,-114.0,3,207.0,208.5,OVER,win,0.877,216.3,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1021,5079516,KJ Jackson,Arkansas,Auburn,betonlineag,218.5,-114.0,-114.0,3,180.0,195.8,UNDER,win,0.877,198.4,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1034,5079619,Kalieb Osborne,UConn,North Carolina,betonlineag,213.5,-114.0,-114.0,3,245.0,208.2,UNDER,loss,-1.0,205.3,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1011,5141629,Keelon Russell,Alabama,LSU,bovada,237.5,-115.0,-115.0,3,206.0,215.5,UNDER,win,0.87,211.7,UNDER,win,0.87,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1008,4918099,Kenny Minchey,Kentucky,Tennessee,betonlineag,204.5,-114.0,-114.0,3,224.0,202.8,UNDER,loss,-1.0,201.0,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1018,4875127,Lanorris Sellers,South Carolina,Texas A&M,betonlineag,237.5,-114.0,-114.0,3,251.0,222.8,UNDER,loss,-1.0,223.3,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,998,5078278,Lincoln Kienholz,Louisville,Georgia Tech,betonlineag,234.5,-114.0,-114.0,3,182.0,247.9,OVER,loss,-1.0,255.4,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1025,5141695,Malik Washington,Maryland,Purdue,betonlineag,242.5,-114.0,-114.0,3,253.0,218.8,UNDER,loss,-1.0,219.6,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1018,4870971,Marcel Reed,Texas A&M,South Carolina,betonlineag,192.5,-114.0,-114.0,3,251.0,177.3,UNDER,loss,-1.0,184.0,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1024,5307005,Mason McKenzie,Boston College,Florida State,betonlineag,173.5,-114.0,-114.0,3,166.0,178.9,OVER,loss,-1.0,171.0,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,997,5079465,Michael Hawkins Jr.,West Virginia,Texas Tech,betonlineag,183.5,-114.0,-114.0,3,303.0,208.0,OVER,win,0.877,198.0,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1026,4801299,Rocco Becht,Penn State,Washington,betonlineag,213.5,-114.0,-114.0,3,240.0,209.3,UNDER,loss,-1.0,221.7,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1025,5104738,Ryan Browne,Purdue,Maryland,betonlineag,246.5,-114.0,-114.0,3,296.0,225.6,UNDER,loss,-1.0,221.7,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1011,5078810,Sam Leavitt,LSU,Alabama,betonlineag,267.5,-114.0,-114.0,3,380.0,253.4,UNDER,loss,-1.0,254.1,UNDER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1001,4685694,Steven Angeli,Syracuse,Clemson,betonlineag,218.5,-114.0,-114.0,2,263.0,224.7,OVER,win,0.877,220.9,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1001,5159078,Tait Reynolds,Clemson,Syracuse,bovada,200.5,-115.0,-115.0,2,161.0,203.4,OVER,loss,-1.0,206.3,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,997,4773919,Thomas Castellanos,Texas Tech,West Virginia,betonlineag,204.5,-114.0,-114.0,3,362.0,213.3,OVER,win,0.877,229.5,OVER,win,0.877,2026-11-05,20,2026-11-08 14:04,False
+2026,10,2026-11-07,1010,5295814,Tramell Jones Jr.,Florida,Oklahoma,betonlineag,202.5,-114.0,-114.0,3,133.0,183.5,UNDER,win,0.877,178.9,UNDER,win,0.877,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1012,4911529,Trinidad Chambliss,Ole Miss,Georgia,bovada,259.5,-115.0,-115.0,3,170.0,241.6,UNDER,win,0.87,247.0,UNDER,win,0.87,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1020,5092275,Ty Dieffenbach,UCLA,Minnesota,bovada,170.5,-115.0,-115.0,3,303.0,194.0,OVER,win,0.87,192.8,OVER,win,0.87,2026-11-05,20,2026-11-08 14:04,True
+2026,10,2026-11-07,1002,4694149,Walker Eget,Duke,NC State,betonlineag,210.5,-114.0,-114.0,3,208.0,224.5,OVER,loss,-1.0,225.0,OVER,loss,-1.0,2026-11-05,20,2026-11-08 14:04,False

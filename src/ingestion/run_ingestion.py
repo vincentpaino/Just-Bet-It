@@ -21,11 +21,13 @@ attach to games by CFBD game ID.
 
 import argparse
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
 
 from dotenv import load_dotenv
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import OperationalError
 
 load_dotenv()
 
@@ -787,16 +789,28 @@ def log_run(
     session.commit()
 
 
+DB_RETRY_WAIT = 60   # seconds before retrying a step after a dropped connection
+
+
 def _run_step(session, label: str, source: str, func, year: int):
     """
-    Run one ingestion step. A failure is printed and logged but does not stop
-    the other steps.
+    Run one ingestion step. A dropped database connection gets one retry
+    (every step is safe to re-run; props skip games already captured, so no
+    credit is spent twice). Any other failure is printed and logged but does
+    not stop the other steps.
     """
 
     try:
         print(f"[{label}] Starting for {year}...")
 
-        written = func(session, year)
+        try:
+            written = func(session, year)
+        except OperationalError as exc:
+            session.rollback()
+            print(f"[{label}] database connection lost ({str(exc).splitlines()[0]}); "
+                  f"retrying in {DB_RETRY_WAIT}s")
+            time.sleep(DB_RETRY_WAIT)
+            written = func(session, year)
 
         print(f"[{label}] Successfully wrote {written} records")
 

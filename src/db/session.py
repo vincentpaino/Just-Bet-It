@@ -47,8 +47,15 @@ def get_database_url() -> URL:
 
 
 # pool_pre_ping replaces connections the server closed while idle (Neon
-# suspends its compute after a few idle minutes).
-engine = create_engine(get_database_url(), pool_pre_ping=True)
+# suspends its compute after a few idle minutes). TCP keepalives make a
+# connection that died mid-query (Wi-Fi drop, sleep) fail within about a
+# minute instead of hanging for many, so the job's retries can take over.
+engine = create_engine(
+    get_database_url(),
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 15, "keepalives": 1, "keepalives_idle": 30,
+                  "keepalives_interval": 10, "keepalives_count": 3},
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

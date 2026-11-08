@@ -52,18 +52,37 @@ PY
     return 1
 }
 
+# A dropped database connection shouldn't cost the week (it lost week 10's
+# recorded picks): retry a step up to 3 times, waiting for the network in
+# between. Every step it wraps is safe to re-run: grading only adds new games,
+# training and backups overwrite, and picks are recorded once.
+retry() {
+    local label="$1"; shift
+    for attempt in 1 2 3; do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$attempt" -lt 3 ]; then
+            echo "[$label] attempt $attempt failed; retrying in 60s"
+            sleep 60
+            wait_for_network || true
+        fi
+    done
+    echo "[$label] FAILED after 3 attempts; job continues"
+}
+
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
     wait_for_network
     # caffeinate keeps the Mac from going back to sleep until the job finishes
     /usr/bin/caffeinate -i "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
     # Grade last weekend's picks into reports/ (a failure here shouldn't skip the backup)
-    /usr/bin/caffeinate -i "$PY" -m scripts.weekly_report || echo "[report] FAILED; job continues"
+    retry report /usr/bin/caffeinate -i "$PY" -m scripts.weekly_report
     # THEN retrain on everything, including last weekend (order matters: grading
     # first means each week is graded by the model that made its picks).
     # If training fails, the previous models stay in place.
-    /usr/bin/caffeinate -i "$PY" -m scripts.train || echo "[train] FAILED; keeping previous models"
+    retry train /usr/bin/caffeinate -i "$PY" -m scripts.train
     # Record this week's picks (Friday line, all predictions) for live CLV; no credits
-    /usr/bin/caffeinate -i "$PY" -m scripts.record_picks || echo "[picks] FAILED; job continues"
-    /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
+    retry picks /usr/bin/caffeinate -i "$PY" -m scripts.record_picks
+    retry backup /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1
