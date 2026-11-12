@@ -87,11 +87,15 @@ def main():
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     target = BACKUP_DIR / f"just_bet_it_{datetime.now():%Y%m%d_%H%M}.dump"
 
-    subprocess.run(
-        [pg_dump, "--format=custom", "--no-owner", "--no-privileges", "--file", str(target)],
-        env=libpq_env(get_database_url()),
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [pg_dump, "--format=custom", "--no-owner", "--no-privileges", "--file", str(target)],
+            env=libpq_env(get_database_url()),
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        target.unlink(missing_ok=True)   # a failed dump leaves an empty file that would count as a backup
+        raise
 
     backups = sorted(BACKUP_DIR.glob("just_bet_it_*.dump"))
     for old in backups[:-KEEP]:

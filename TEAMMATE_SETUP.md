@@ -252,7 +252,9 @@ section shows how far those lines moved toward our picks (the backtest
 average was +2.5 yds). The installer sets up both jobs. `pmset` can only
 schedule one repeating wake (Friday 8:55), so the Saturday runs need the Mac
 awake; a run missed while it slept happens on wake and skips games that have
-already started.
+already started. **Keep the Mac plugged in Thursday night through Saturday:**
+on battery with the lid closed it only half-wakes, keeps dropping back to
+sleep and loses the network mid-job (that's what broke the Nov 6 run).
 
 `scripts/backtest.py` scores the models against each book's last line before
 kickoff, at the real prices. It reports "no QB games" until lines have been

@@ -74,15 +74,18 @@ retry() {
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
     wait_for_network
-    # caffeinate keeps the Mac from going back to sleep until the job finishes
-    /usr/bin/caffeinate -i "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
+    # caffeinate keeps the Mac awake until each step finishes. -s (no system
+    # sleep) only works on AC power: on battery with the lid closed the Mac
+    # keeps dropping back to sleep and the network with it (what broke the
+    # Nov 6 run), so leave it plugged in Thursday night.
+    /usr/bin/caffeinate -is "$PY" -m src.ingestion.run_ingestion --props --props-window-hours 48 "$@"
     # Grade last weekend's picks into reports/ (a failure here shouldn't skip the backup)
-    retry report /usr/bin/caffeinate -i "$PY" -m scripts.weekly_report
+    retry report /usr/bin/caffeinate -is "$PY" -m scripts.weekly_report
     # THEN retrain on everything, including last weekend (order matters: grading
     # first means each week is graded by the model that made its picks).
     # If training fails, the previous models stay in place.
-    retry train /usr/bin/caffeinate -i "$PY" -m scripts.train
+    retry train /usr/bin/caffeinate -is "$PY" -m scripts.train
     # Record this week's picks (Friday line, all predictions) for live CLV; no credits
-    retry picks /usr/bin/caffeinate -i "$PY" -m scripts.record_picks
-    retry backup /usr/bin/caffeinate -i "$PY" -m scripts.backup_db
+    retry picks /usr/bin/caffeinate -is "$PY" -m scripts.record_picks
+    retry backup /usr/bin/caffeinate -is "$PY" -m scripts.backup_db
 } >> logs/snapshot_odds.log 2>&1

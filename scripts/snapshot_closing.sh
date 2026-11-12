@@ -36,5 +36,5 @@ PY
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
     wait_for_network
-    /usr/bin/caffeinate -i "$PY" -m scripts.snapshot_closing
+    /usr/bin/caffeinate -is "$PY" -m scripts.snapshot_closing
 } >> logs/snapshot_closing.log 2>&1
