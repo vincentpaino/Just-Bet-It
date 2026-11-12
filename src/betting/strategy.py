@@ -90,6 +90,10 @@ def simulate_bankroll(bets: pd.DataFrame, prediction_col: str, prob_model, confi
     that morning's bankroll (they're placed at the same time), then scaled down
     together if they'd exceed max_daily_exposure.
 
+    `prob_model` is a probability model, or a function date -> probability
+    model, so each day's win chances can come only from games before it
+    (leak-free backtests).
+
     Returns (log, summary): one log row per bet placed, and totals.
     """
     config = config or BetConfig()
@@ -99,13 +103,14 @@ def simulate_bankroll(bets: pd.DataFrame, prediction_col: str, prob_model, confi
 
     df = bets.sort_values("game_date")
     for date, day in df.groupby("game_date", sort=True):
+        day_model = prob_model(date) if callable(prob_model) else prob_model
         picks = []
         for row in day.itertuples(index=False):
             pred = getattr(row, prediction_col)
             if not np.isfinite(pred):
                 continue
             for side, price in (("OVER", row.over_odds), ("UNDER", row.under_odds)):
-                bet = evaluate_side(pred, row.line, price, side, prob_model, config)
+                bet = evaluate_side(pred, row.line, price, side, day_model, config)
                 if bet["qualifies"]:
                     picks.append((row, bet))
         if not picks:

@@ -9,6 +9,7 @@ psycopg2-binary
 
 # --- ML ---
 scikit-learn
+scipy
 xgboost # brew install libomp -- installs OpenMP runtime needed for this library
 optuna # used for automated hyperparameter search/optimization
 

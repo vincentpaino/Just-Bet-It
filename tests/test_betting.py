@@ -197,3 +197,20 @@ def test_cap_exposure():
     capped = cap_exposure([0.05] * 10, 0.30)
     assert capped.sum() == pytest.approx(0.30) and np.allclose(capped, 0.03)
     assert cap_exposure([], 0.30).sum() == 0
+
+
+def test_bankroll_simulation_can_size_each_day_from_earlier_games_only():
+    bets = pd.DataFrame({
+        "game_date": pd.to_datetime(["2026-09-05", "2026-09-05", "2026-09-12"]),
+        "game_id": [1, 2, 3], "player_id": [10, 20, 30],
+        "line": [200.5, 210.5, 220.5], "over_odds": [100, 100, 100], "under_odds": [100, 100, 100],
+        "passing_yards": [260, 150, 300], "pred": [260.0, 150.0, 290.0],
+    })
+    asked = []
+    def for_date(date):
+        asked.append(pd.Timestamp(date))
+        return ResidualModel(sd=40)
+    log, summary = simulate_bankroll(bets, "pred", for_date, BetConfig(min_ev=0.0))
+    assert asked == [pd.Timestamp("2026-09-05"), pd.Timestamp("2026-09-12")]   # once per day, in order
+    assert summary["bets"] == 3 and summary["wins"] == 3
+    assert list(log["prediction"]) == [260.0, 150.0, 290.0]                     # each bet's own prediction

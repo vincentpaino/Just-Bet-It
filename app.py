@@ -31,7 +31,10 @@ from scripts.weekly_report import CONFIDENT_RULE  # noqa: E402
 from scripts.predict_upcoming import format_kickoff, load_upcoming_lines, upcoming_qbs  # noqa: E402
 from scripts.train import MODELS_PATH, load_models, predict_all  # noqa: E402
 from scripts.xgboost_reg import build_features, build_upcoming_features, has_history, load_qb_games  # noqa: E402
-from src.betting import BetConfig, best_bet, cap_exposure, evaluate_side, from_bundle, simulate_bankroll  # noqa: E402
+from scipy.stats import binom  # noqa: E402
+from src.betting import (  # noqa: E402
+    BetConfig, ResidualModel, best_bet, cap_exposure, evaluate_side, from_bundle, simulate_bankroll,
+)
 from src.db.session import SessionLocal, engine  # noqa: E402
 
 OVER, UNDER, INK, MUTED, GOLD = "#1F7A4D", "#B03A2E", "#14213D", "#5B6573", "#C9A227"
@@ -240,6 +243,22 @@ def backtest_bets(mtime, wf_mtime):
     total = len(history_predictions(mtime).merge(lines, on=["game_id", "player_id"]))
     bets = fair_predictions(mtime, wf_mtime).merge(lines, on=["game_id", "player_id"], how="inner")
     return bets.sort_values(["game_date", "game_id"]).reset_index(drop=True), total
+
+
+def earlier_misses(bets, key):
+    """Win chances for each date built only from this model's misses on games
+    before that date, so no bet is sized with knowledge of its own result.
+    (Until 50 earlier misses exist, a bell curve of the misses so far is used.)"""
+    d = bets[["game_date", "passing_yards", key]].dropna().sort_values("game_date")
+    dates = d["game_date"].to_numpy()
+    misses = (d["passing_yards"] - d[key]).to_numpy(dtype=float)
+    cache = {}
+
+    def for_date(date):
+        if date not in cache:
+            cache[date] = ResidualModel(misses[dates < pd.Timestamp(date).to_datetime64()])
+        return cache[date]
+    return for_date
 
 
 def confident(df):
@@ -797,9 +816,11 @@ def page_backtest():
 
     st.subheader("Kelly bankroll")
     st.markdown('<p class="note">Bets only when expected value clears the minimum, sized as a fraction '
-                'of full Kelly from each model\'s win chance, replayed in date order. Games on the same day '
-                'are sized from that morning\'s bankroll, and one day\'s bets together never exceed 30% of it.'
-                '</p>', unsafe_allow_html=True)
+                'of full Kelly from each model\'s win chance, replayed in date order. Each day\'s win chances '
+                'come only from that model\'s misses on earlier games, so no bet is sized using its own '
+                'result. Games on the same day are sized from that morning\'s bankroll, and one day\'s bets '
+                'together never exceed 30% of it. The settings below are for exploring: picking the ones '
+                'that look best here is overfitting.</p>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     min_ev = c1.slider("Minimum EV", 0.0, 0.20, BetConfig.min_ev, step=0.01, format="%.2f", key="bt_ev")
     kelly = c2.select_slider("Kelly fraction", options=[0.1, 0.25, 0.5, 1.0], value=BetConfig.kelly_multiplier,
@@ -809,15 +830,21 @@ def page_backtest():
     config = BetConfig(min_ev=min_ev, min_edge_yards=edge, kelly_multiplier=kelly)
     summary, paths = [], []
     for key, name in MODEL_NAMES.items():
-        log, k = simulate_bankroll(bets, key, from_bundle(b, key), config, start=start)
-        summary.append({"Model": name, "Bets": k["bets"], "Win rate": 100 * k["win_rate"], "Staked": k["staked"],
-                        "Profit": k["profit"], "ROI on stakes": 100 * k["roi"], "Final bankroll": k["final"],
-                        "Worst drawdown": 100 * k["max_drawdown"]})
+        log, k = simulate_bankroll(bets, key, earlier_misses(bets, key), config, start=start)
+        decided = k["wins"] + k["losses"]
+        summary.append({"Model": name, "Bets": k["bets"], "Win rate": 100 * k["win_rate"],
+                        "p": float(binom.sf(k["wins"] - 1, decided, 0.524)) if decided else np.nan,
+                        "Staked": k["staked"], "Profit": k["profit"], "ROI on stakes": 100 * k["roi"],
+                        "Final bankroll": k["final"], "Worst drawdown": 100 * k["max_drawdown"]})
         if len(log):
             paths.append(pd.DataFrame({"Bet number": np.arange(0, len(log) + 1),
                                        "Bankroll": np.r_[start, log["bankroll"].to_numpy()], "Model": name}))
-    st.dataframe(pd.DataFrame(summary), hide_index=True, width="stretch", column_config={
+    summary = pd.DataFrame(summary)
+    st.dataframe(summary, hide_index=True, width="stretch", column_config={
         "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
+        "p": st.column_config.NumberColumn("p-value", format="%.3f",
+                                           help="Chance of a win rate this high if the true rate were break-even "
+                                                "(52.4%). Below 0.05 would be evidence of a real edge."),
         "Staked": st.column_config.NumberColumn(format="%.2f"),
         "Profit": st.column_config.NumberColumn(format="%+.2f"),
         "ROI on stakes": st.column_config.NumberColumn(format="%.1f%%"),
@@ -836,11 +863,14 @@ def page_backtest():
         st.altair_chart((base + chart).properties(height=320), width="stretch")
     else:
         st.info("No bets cleared the minimum EV. Lower it to see a bankroll path.")
-    if "residuals" not in b:
-        st.caption("This models file has no saved misses, so win chances use a bell curve. "
-                   "Retrain on the Models & data page to use each model's real misses.")
-    st.caption("Win chances come from the current models' misses on their held-out test set, which "
-               "overlaps the newest of these games, so treat this as an optimistic estimate.")
+    real = summary[summary["p"] < 0.05]
+    verdict = ("No model's Kelly result is statistically different from break-even: the bankroll swings are "
+               "mostly luck, magnified by compounding." if real.empty else
+               f"Better than break-even at p < 0.05: {', '.join(real['Model'])}. Several models and settings "
+               "were compared, so treat even this with caution.")
+    st.markdown(f'<p class="note"><b>{verdict}</b> ROI on stakes is the honest number to look at; a big final '
+                'bankroll can come from a lucky streak early on. The pre-registered confident-picks rule '
+                '(see that tab) is the fair test of an edge.</p>', unsafe_allow_html=True)
 
 
 def page_models():
